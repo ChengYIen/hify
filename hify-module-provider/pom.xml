@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.hify</groupId>
+        <artifactId>hify</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>hify-module-provider</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Hify Module :: Provider</name>
+    <description>模型提供商管理（OpenAI / Claude / Gemini / Ollama）</description>
+
+    <dependencies>
+        <!-- 跨模块通信：只依赖 shared 接口，不依赖其他 module -->
+        <dependency>
+            <groupId>com.hify</groupId>
+            <artifactId>hify-shared</artifactId>
+        </dependency>
+
+        <!-- 全局基础设施 -->
+        <dependency>
+            <groupId>com.hify</groupId>
+            <artifactId>hify-common</artifactId>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+</project>

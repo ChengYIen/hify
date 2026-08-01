@@ -1,0 +1,28 @@
+# ======================== 生产环境 ========================
+# 所有敏感值通过 K8s Secret 环境变量注入
+# 此文件只保留非敏感的生产默认值
+
+spring:
+  datasource:
+    mysql:
+      jdbc-url: jdbc:mysql://${MYSQL_HOST}:3306/${MYSQL_DATABASE:hify}?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai
+      username: ${MYSQL_USER}
+      password: ${MYSQL_PASSWORD}
+    postgresql:
+      jdbc-url: jdbc:postgresql://${PG_HOST}:5432/${PG_DATABASE:hify}
+      username: ${PG_USER}
+      password: ${PG_PASSWORD}
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+logging:
+  level:
+    com.hify: info
+    root: warn
