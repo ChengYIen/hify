@@ -17,7 +17,7 @@ public interface ChatMessageService {
     ChatMessageResponse createUserMessage(Long sessionId, String content);
 
     ChatMessageResponse createAssistantMessage(Long sessionId, String content, String model,
-                                                String tokenUsage, String finishReason);
+                                                String tokenUsage, String finishReason, Integer latencyMs);
 
     ChatMessageResponse getById(Long id);
 }

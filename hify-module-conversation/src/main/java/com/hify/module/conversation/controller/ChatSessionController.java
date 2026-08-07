@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 对话会话控制器.
  */
 @RestController
-@RequestMapping("/api/v1/chat-sessions")
+@RequestMapping("/api/v1/chat/sessions")
 @RequiredArgsConstructor
 public class ChatSessionController {
 

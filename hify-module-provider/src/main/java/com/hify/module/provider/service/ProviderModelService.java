@@ -23,4 +23,11 @@ public interface ProviderModelService {
     ProviderModelResponse update(Long id, ProviderModelUpdateRequest request);
 
     void delete(Long id);
+
+    /**
+     * 列出所有已启用的模型配置（跨 provider，用于 Agent 下拉选择）.
+     *
+     * @return 所有已启用模型列表
+     */
+    List<ProviderModelResponse> listAllEnabled();
 }

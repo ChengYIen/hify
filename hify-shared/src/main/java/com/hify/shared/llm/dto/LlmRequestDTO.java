@@ -20,6 +20,9 @@ import java.util.Map;
 @AllArgsConstructor
 public class LlmRequestDTO {
 
+    /** 模型配置 ID（模型路由由 provider 模块内部完成，调用方不感知厂商/密钥） */
+    private Long modelId;
+
     /** 模型名称（如 gpt-4o / claude-sonnet-4-20250514） */
     private String model;
 

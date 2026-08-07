@@ -32,8 +32,11 @@ public class ChatMessageEntity extends BaseEntity {
     /** Token 用量（JSON：promptTokens / completionTokens / totalTokens） */
     private String tokenUsage;
 
-    /** 停止原因：stop / length / tool_calls / content_filter */
+    /** 停止原因：stop / length / error / tool_calls / content_filter */
     private String finishReason;
+
+    /** 响应耗时（毫秒），仅 assistant 消息 */
+    private Integer latencyMs;
 
     /** 工具调用请求（JSON，模型要求调用工具时） */
     private String toolCalls;

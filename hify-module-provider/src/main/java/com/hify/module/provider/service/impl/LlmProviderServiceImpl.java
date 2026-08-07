@@ -1,0 +1,209 @@
+package com.hify.module.provider.service.impl;
+
+import com.hify.common.exception.BizException;
+import com.hify.common.exception.ErrorCode;
+import com.hify.common.http.LlmApiException;
+import com.hify.common.resilience.CircuitBreakerService;
+import com.hify.module.provider.adapter.ProviderAdapter;
+import com.hify.module.provider.adapter.ProviderAdapterFactory;
+import com.hify.module.provider.adapter.StreamChatCallback;
+import com.hify.module.provider.adapter.dto.ChatRequest;
+import com.hify.module.provider.adapter.dto.ChatResponse;
+import com.hify.module.provider.repository.ProviderMapper;
+import com.hify.module.provider.repository.ProviderModelMapper;
+import com.hify.module.provider.repository.entity.ModelConfig;
+import com.hify.module.provider.repository.entity.Provider;
+import com.hify.shared.llm.LlmProviderApi;
+import com.hify.shared.llm.LlmStreamCallback;
+import com.hify.shared.llm.dto.LlmRequestDTO;
+import com.hify.shared.llm.dto.LlmResponseDTO;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * LLM 提供商统一调用实现 —— 单一路由器.
+ *
+ * <p>实现 {@link LlmProviderApi}，按 {@code modelId} 解析出厂商、适配器与密钥，
+ * 全部在 provider 模块内部完成，调用方（conversation / agent）不感知厂商差异，
+ * 也不接触 apiKey/baseUrl。</p>
+ *
+ * <h3>解析链路</h3>
+ * <pre>
+ * modelId → ModelConfig（校验 ENABLED）→ Provider（校验 ENABLED）
+ *         → ProviderAdapterFactory.getAdapter(providerCode) → 实际 HTTP 调用
+ * </pre>
+ *
+ * <p>同步 {@link #chat} 走熔断 + 重试；流式 {@link #streamChat} 不做重试
+ * （已发出的增量无法重放），仅透传错误。</p>
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class LlmProviderServiceImpl implements LlmProviderApi {
+
+    private final ProviderModelMapper providerModelMapper;
+    private final ProviderMapper providerMapper;
+    private final ProviderAdapterFactory adapterFactory;
+    private final CircuitBreakerService circuitBreakerService;
+
+    // ================================================================
+    // LlmProviderApi
+    // ================================================================
+
+    @Override
+    public LlmResponseDTO chat(LlmRequestDTO request) {
+        ResolvedTarget target = resolveTarget(request.getModelId());
+        ChatRequest chatRequest = toChatRequest(target, request, false);
+
+        long start = System.currentTimeMillis();
+        ChatResponse response = circuitBreakerService.executeWithResilience(
+                target.providerCode(),
+                () -> target.adapter().chat(chatRequest));
+        long latency = System.currentTimeMillis() - start;
+
+        LlmResponseDTO dto = toResponse(response, target);
+        dto.setLatencyMs(dto.getLatencyMs() != null ? dto.getLatencyMs() : latency);
+        log.info("LLM 同步对话完成: modelId={}, provider={}, latencyMs={}",
+                request.getModelId(), target.providerCode(), dto.getLatencyMs());
+        return dto;
+    }
+
+    @Override
+    public void streamChat(LlmRequestDTO request, LlmStreamCallback callback) {
+        ResolvedTarget target = resolveTarget(request.getModelId());
+        ChatRequest chatRequest = toChatRequest(target, request, true);
+
+        log.info("LLM 流式对话开始: modelId={}, provider={}", request.getModelId(), target.providerCode());
+        target.adapter().streamChat(chatRequest, new StreamChatCallback() {
+            @Override
+            public void onContent(String delta) {
+                callback.onContent(delta);
+            }
+
+            @Override
+            public void onComplete(ChatResponse response) {
+                log.info("LLM 流式对话完成: modelId={}, provider={}, latencyMs={}",
+                        request.getModelId(), target.providerCode(), response.getLatencyMs());
+                callback.onComplete(toResponse(response, target));
+            }
+
+            @Override
+            public void onError(LlmApiException e) {
+                log.warn("LLM 流式对话出错: modelId={}, provider={}, type={}, msg={}",
+                        request.getModelId(), target.providerCode(), e.getType(), e.getMessage());
+                callback.onError(formatError(e));
+            }
+        });
+    }
+
+    // ================================================================
+    // 模型解析
+    // ================================================================
+
+    /**
+     * 按 modelId 解析调用目标：适配器 + 厂商编码 + 模型名 + baseUrl + apiKey.
+     *
+     * @throws BizException modelId 为空 / 模型不存在 / 模型或提供商禁用 / 适配器不支持
+     */
+    private ResolvedTarget resolveTarget(Long modelId) {
+        if (modelId == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "modelId 不能为空");
+        }
+        ModelConfig modelConfig = providerModelMapper.selectById(modelId);
+        if (modelConfig == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "模型不存在: modelId=" + modelId);
+        }
+        if (!"ENABLED".equals(modelConfig.getStatus())) {
+            throw new BizException(ErrorCode.PROVIDER_DISABLED, "模型已禁用: modelId=" + modelId);
+        }
+
+        Provider provider = providerMapper.selectById(modelConfig.getProviderId());
+        if (provider == null) {
+            throw new BizException(ErrorCode.PROVIDER_NOT_FOUND, "providerId=" + modelConfig.getProviderId());
+        }
+        if (!"ENABLED".equals(provider.getStatus())) {
+            throw new BizException(ErrorCode.PROVIDER_DISABLED, "提供商已禁用: id=" + provider.getId());
+        }
+
+        ProviderAdapter adapter = adapterFactory.getAdapter(provider.getProviderCode());
+        if (adapter == null) {
+            throw new BizException(ErrorCode.PROVIDER_CONFIG_ERROR,
+                    "不支持的提供商编码: " + provider.getProviderCode());
+        }
+
+        String apiKey = provider.getAuthConfig() != null ? provider.getAuthConfig().getApiKey() : null;
+        return new ResolvedTarget(adapter, provider.getProviderCode(),
+                modelConfig.getModelName(), provider.getBaseUrl(), apiKey);
+    }
+
+    // ================================================================
+    // DTO 映射
+    // ================================================================
+
+    private ChatRequest toChatRequest(ResolvedTarget target, LlmRequestDTO request, boolean stream) {
+        List<ChatRequest.Message> messages = request.getMessages() == null ? List.of()
+                : request.getMessages().stream()
+                        .map(m -> ChatRequest.Message.builder()
+                                .role(m.getRole())
+                                .content(m.getContent())
+                                .toolCallId(m.getToolCallId())
+                                .build())
+                        .collect(Collectors.toList());
+
+        return ChatRequest.builder()
+                .baseUrl(target.baseUrl())
+                .apiKey(target.apiKey())
+                .model(target.modelName())
+                .messages(messages)
+                .temperature(request.getTemperature())
+                .maxTokens(request.getMaxTokens())
+                .stream(stream)
+                .extra(request.getExtra())
+                .build();
+    }
+
+    private LlmResponseDTO toResponse(ChatResponse response, ResolvedTarget target) {
+        return LlmResponseDTO.builder()
+                .content(response.getContent())
+                .model(response.getModel() != null ? response.getModel() : target.modelName())
+                .usage(toUsage(response.getTokenUsage()))
+                .finishReason(response.getFinishReason())
+                .toolCalls(response.getToolCalls())
+                .latencyMs(response.getLatencyMs())
+                .fallback(false)
+                .build();
+    }
+
+    private LlmResponseDTO.TokenUsage toUsage(ChatResponse.TokenUsage usage) {
+        if (usage == null) {
+            return null;
+        }
+        return LlmResponseDTO.TokenUsage.builder()
+                .promptTokens(usage.getPromptTokens())
+                .completionTokens(usage.getCompletionTokens())
+                .totalTokens(usage.getTotalTokens())
+                .build();
+    }
+
+    /**
+     * 将 {@link LlmApiException} 转译为面向用户的错误描述（镜像适配器的 formatError）.
+     */
+    private String formatError(LlmApiException e) {
+        return switch (e.getType()) {
+            case TIMEOUT       -> "连接超时: 请检查网络或 baseUrl 是否正确";
+            case AUTH_FAILED   -> "认证失败 (401): API Key 无效或已过期";
+            case NETWORK_ERROR -> "网络不可达: 请检查 baseUrl 和网络连接";
+            case SERVER_ERROR  -> "服务器错误 (" + e.getStatusCode() + "): 提供商服务异常，请稍后重试";
+            case RATE_LIMITED  -> "请求过于频繁 (429): 请稍后重试";
+        };
+    }
+
+    /** 一次调用解析出的目标对象 */
+    private record ResolvedTarget(ProviderAdapter adapter, String providerCode,
+                                  String modelName, String baseUrl, String apiKey) {
+    }
+}

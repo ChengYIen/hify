@@ -90,10 +90,10 @@ module/<name>/
 
 | 层 | 规则 |
 |---|---|
-| **Controller** | ≤8 个 public 方法；方法体 ≤15 行；不写业务逻辑；入参用独立 Request 类，不用 Entity |
-| **Service** | `@Transactional(rollbackFor = Exception.class)` 只在 Service 方法上；返回值是 DTO，不返回 Entity；不操作 HttpServletRequest/Response |
+| **Controller** | ≤8 个 public 方法；方法体 ≤15 行；不写业务逻辑；入参用独立 Request 类，不用 Entity；语义有歧义的更新接口要拆开（基本信息 vs 关联数据分开端点） |
+| **Service** | `@Transactional(rollbackFor = Exception.class)` 只在 Service 方法上；返回值是 DTO，不返回 Entity；不操作 HttpServletRequest/Response；关联表更新优先全量替换（删旧插新），数据量小（<100 条）时比 diff 更简单可靠 |
 | **Repository** | 只做数据访问，不含业务判断；Entity 不出 Service 层；Entity 不写 `validate()`/`activate()` 等业务方法 |
-| **跨模块调用** | 调用方只注入 `shared` 接口；shared DTO 不引用任何 module 的类 |
+| **跨模块调用** | 调用方只注入 `shared` 接口，走 Service 不直接调 Mapper；shared DTO 不引用任何 module 的类 |
 
 ### DTO 命名规范
 

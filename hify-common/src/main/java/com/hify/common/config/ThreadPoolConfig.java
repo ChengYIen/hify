@@ -5,7 +5,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 线程池配置.
@@ -18,11 +20,15 @@ import java.util.concurrent.ThreadPoolExecutor;
  *   <tr><th>线程池</th><th>核心/最大</th><th>队列</th><th>拒绝策略</th><th>职责</th></tr>
  *   <tr><td>llmExecutor</td><td>10/50</td><td>100</td><td>CallerRuns</td><td>LLM API 调用（IO 密集型）</td></tr>
  *   <tr><td>asyncExecutor</td><td>5/20</td><td>200</td><td>CallerRuns</td><td>日志异步写入等非关键任务</td></tr>
+ *   <tr><td>heartbeatScheduler</td><td>2（调度器）</td><td>-</td><td>-</td><td>SSE 心跳保活（周期任务，daemon）</td></tr>
  * </table>
  */
 @Slf4j
 @Configuration
 public class ThreadPoolConfig {
+
+    /** SSE 心跳线程命名计数器 */
+    private static final AtomicInteger HEARTBEAT_THREAD_COUNTER = new AtomicInteger(1);
 
     // ================================================================
     // llmExecutor — LLM API 调用
@@ -75,5 +81,35 @@ public class ThreadPoolConfig {
         executor.initialize();
         log.info("asyncExecutor 初始化完成: core=5, max=20, queue=200, reject=CallerRuns");
         return executor;
+    }
+
+    // ================================================================
+    // heartbeatScheduler — SSE 心跳保活
+    // ================================================================
+
+    /**
+     * SSE 心跳定时器.
+     * <p>
+     * 流式对话的长连接可能被网关（Nginx/云 LB）因"长时间无数据"掐断，
+     * 此调度器每 10s 向 {@code SseEmitter} 发送一个 SSE comment（{@code :ping}）保持连接活性。
+     * 任务量极小（每条流 1 个周期任务），2 个 daemon 线程足够。
+     * </p>
+     * <p>
+     * 手写 {@link ThreadFactory} 命名线程 + daemon 标记，避免非守护线程阻止应用关闭。
+     * </p>
+     */
+    @Bean("heartbeatScheduler")
+    public ScheduledThreadPoolExecutor heartbeatScheduler() {
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(2, r -> {
+            Thread t = new Thread(r, "heartbeat-" + HEARTBEAT_THREAD_COUNTER.getAndIncrement());
+            t.setDaemon(true);
+            return t;
+        });
+        // 取消任务后立刻释放其持有的资源，避免已取消的周期任务残留
+        scheduler.setRemoveOnCancelPolicy(true);
+        scheduler.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        scheduler.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
+        log.info("heartbeatScheduler 初始化完成: core=2, daemon=true");
+        return scheduler;
     }
 }

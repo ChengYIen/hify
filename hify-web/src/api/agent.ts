@@ -121,3 +121,42 @@ export function updateAgentTools(id: number, tools: AgentToolData[]): Promise<Ag
 export function deleteAgent(id: number): Promise<void> {
   return del<void>(`/v1/agents/${id}`)
 }
+
+// =========================================================================
+// Tool Definitions
+// =========================================================================
+
+export type ToolDefinitionResponse = {
+  id: number
+  toolName: string
+  toolType: string
+  description: string | null
+  toolConfig: string | null
+  status: string
+}
+
+/** 列出所有已启用的工具定义 */
+export function listToolDefinitions(): Promise<ToolDefinitionResponse[]> {
+  return get<ToolDefinitionResponse[]>('/v1/tool-definitions')
+}
+
+// =========================================================================
+// Model Configs (用于 Agent 创建/编辑时的模型下拉选择)
+// =========================================================================
+
+export type ModelConfigResponse = {
+  id: number
+  providerId: number
+  modelName: string
+  displayName: string | null
+  modelType: string
+  contextWindow: number
+  maxOutput: number
+  supportsTools: number
+  status: string
+}
+
+/** 列出所有已启用的模型配置 */
+export function listModelConfigs(): Promise<ModelConfigResponse[]> {
+  return get<ModelConfigResponse[]>('/v1/model-configs')
+}

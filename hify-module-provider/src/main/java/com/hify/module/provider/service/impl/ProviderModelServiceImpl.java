@@ -136,6 +136,16 @@ public class ProviderModelServiceImpl implements ProviderModelService {
         log.info("ProviderModel 删除成功: id={}", id);
     }
 
+    @Override
+    public List<ProviderModelResponse> listAllEnabled() {
+        List<ModelConfig> list = providerModelMapper.selectList(
+                new LambdaQueryWrapper<ModelConfig>()
+                        .eq(ModelConfig::getStatus, "ENABLED")
+                        .orderByAsc(ModelConfig::getProviderId)
+                        .orderByDesc(ModelConfig::getPriority));
+        return list.stream().map(this::toResponse).collect(Collectors.toList());
+    }
+
     private ProviderModelResponse toResponse(ModelConfig entity) {
         return ProviderModelResponse.builder()
                 .id(entity.getId())

@@ -18,6 +18,7 @@ public class ChatMessageResponse {
     private String content;
     private String model;
     private String finishReason;
+    private Integer latencyMs;
     private String toolCalls;
     private String toolCallId;
     private Integer fallback;

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hify.common.http.LlmApiException;
 import com.hify.common.http.LlmHttpClient;
+import com.hify.module.provider.adapter.dto.ChatRequest;
+import com.hify.module.provider.adapter.dto.ChatResponse;
 import com.hify.module.provider.controller.dto.ConnectionTestResult;
 import com.hify.module.provider.repository.entity.AuthConfig;
 import com.hify.module.provider.repository.entity.Provider;
@@ -27,6 +29,10 @@ import java.util.Map;
  *   <li>{@link #getModelsArrayKey()} — 响应体中模型列表的 JSON key（如 data）</li>
  *   <li>{@link #extractModelId(JsonNode)} — 从单个模型 JSON 节点提取标识符</li>
  *   <li>{@link #buildHeaders(AuthConfig)} — 根据鉴权配置构建请求头</li>
+ *   <li>{@link #getChatEndpoint()} — 对话端点路径（如 /v1/chat/completions）</li>
+ *   <li>{@link #buildChatRequestBody(ChatRequest)} — 将统一请求转为厂商 JSON</li>
+ *   <li>{@link #parseChatResponse(String)} — 将厂商 JSON 响应转为统一格式</li>
+ *   <li>{@link #extractStreamDelta(String)} — 从单行 SSE JSON 提取增量文本</li>
  * </ul>
  */
 @Slf4j
@@ -61,8 +67,35 @@ public abstract class AbstractProviderAdapter implements ProviderAdapter {
     /** 根据鉴权配置构建 HTTP 请求头 */
     protected abstract Map<String, String> buildHeaders(AuthConfig auth);
 
+    /** 对话端点路径，如 {@code /v1/chat/completions}（OpenAI）或 {@code /v1/messages}（Anthropic） */
+    protected abstract String getChatEndpoint();
+
+    /** 根据 API Key 构建对话请求头 */
+    protected abstract Map<String, String> buildChatHeaders(String apiKey);
+
+    /** 将 {@link ChatRequest} 转换为厂商特定的 JSON 请求体 */
+    protected abstract String buildChatRequestBody(ChatRequest request);
+
+    /** 将厂商 HTTP 响应体（JSON）解析为 {@link ChatResponse} */
+    protected abstract ChatResponse parseChatResponse(String responseBody);
+
+    /**
+     * 从单行 SSE JSON 中提取增量文本内容.
+     *
+     * <p>不同厂商的 SSE 格式不同：
+     * <ul>
+     *   <li>OpenAI: {@code {"choices":[{"delta":{"content":"你好"}}]}} → "你好"</li>
+     *   <li>Anthropic: {@code {"type":"content_block_delta","delta":{"text":"你好"}}} → "你好"</li>
+     *   <li>Ollama: {@code {"message":{"content":"你好"}}} → "你好"</li>
+     * </ul>
+     *
+     * @param line 单行 SSE data（不含 {@code "data: "} 前缀）
+     * @return 增量文本，可能为 {@code null}（非内容行，如首条元数据帧）
+     */
+    protected abstract String extractStreamDelta(String line);
+
     // ================================================================
-    // ProviderAdapter 实现
+    // 原有模板方法：ProviderAdapter 实现
     // ================================================================
 
     @Override
@@ -208,5 +241,129 @@ public abstract class AbstractProviderAdapter implements ProviderAdapter {
             case SERVER_ERROR  -> "服务器错误 (" + e.getStatusCode() + "): 提供商服务异常，请稍后重试";
             case RATE_LIMITED  -> "请求过于频繁 (429): 请稍后重试";
         };
+    }
+
+    // ================================================================
+    // 新增模板方法：对话调用
+    // ================================================================
+
+    @Override
+    public ChatResponse chat(ChatRequest request) {
+        String url = resolveUrl(request.getBaseUrl());
+        if (url == null) {
+            throw new LlmApiException(LlmApiException.Type.NETWORK_ERROR, 0, "",
+                    "baseUrl 未配置且该厂商无默认地址");
+        }
+        String fullUrl = url + getChatEndpoint();
+        Map<String, String> headers = buildChatHeaders(request.getApiKey());
+        String requestBody = buildChatRequestBody(request);
+
+        long start = System.currentTimeMillis();
+        String responseBody = llmHttpClient.post(fullUrl, headers, requestBody);
+
+        ChatResponse response = parseChatResponse(responseBody);
+        response.setLatencyMs(System.currentTimeMillis() - start);
+        response.setModel(request.getModel());
+        return response;
+    }
+
+    @Override
+    public void streamChat(ChatRequest request, StreamChatCallback callback) {
+        String url = resolveUrl(request.getBaseUrl());
+        if (url == null) {
+            callback.onError(new LlmApiException(LlmApiException.Type.NETWORK_ERROR, 0, "",
+                    "baseUrl 未配置且该厂商无默认地址"));
+            return;
+        }
+        String fullUrl = url + getChatEndpoint();
+        Map<String, String> headers = buildChatHeaders(request.getApiKey());
+
+        // 强制开启流式标志
+        ChatRequest streamRequest = ChatRequest.builder()
+                .baseUrl(request.getBaseUrl())
+                .apiKey(request.getApiKey())
+                .model(request.getModel())
+                .messages(request.getMessages())
+                .temperature(request.getTemperature())
+                .maxTokens(request.getMaxTokens())
+                .stream(true)
+                .tools(request.getTools())
+                .extra(request.getExtra())
+                .build();
+        String requestBody = buildChatRequestBody(streamRequest);
+
+        long start = System.currentTimeMillis();
+        StringBuilder contentBuilder = new StringBuilder();
+
+        llmHttpClient.stream(fullUrl, headers, requestBody, new com.hify.common.http.StreamCallback() {
+
+            /** 是否已向回调上报错误，保证 onError 只触发一次，且之后不再回调 onContent/onComplete */
+            private boolean errorReported;
+
+            /**
+             * 将回调内部抛出的运行时异常转译为 {@link LlmApiException} 上报.
+             *
+             * <p>典型场景：客户端断开导致 {@code emitter.send()} 抛出
+             * {@code IllegalStateException}，此时流的正常结束/异常路径都已失效，
+             * 必须主动调用一次 {@link StreamChatCallback#onError} 让上层感知，
+             * 否则整个流会静默死亡（onComplete/onError 都不触发）。</p>
+             */
+            private void reportCallbackError(RuntimeException e) {
+                if (errorReported) {
+                    log.warn("streamChat 回调异常已被上报，忽略后续异常: {}", e.getMessage());
+                    return;
+                }
+                errorReported = true;
+                log.warn("streamChat 回调处理失败，上报 onError: {}", e.getMessage());
+                callback.onError(new LlmApiException(
+                        LlmApiException.Type.NETWORK_ERROR, 0, fullUrl,
+                        "流式回调处理失败: " + e.getMessage()));
+            }
+
+            @Override
+            public void onLine(String data) {
+                if (errorReported) {
+                    return;
+                }
+                try {
+                    String delta = extractStreamDelta(data);
+                    if (delta != null && !delta.isEmpty()) {
+                        contentBuilder.append(delta);
+                        callback.onContent(delta);
+                    }
+                } catch (RuntimeException e) {
+                    reportCallbackError(e);
+                }
+            }
+
+            @Override
+            public void onComplete() {
+                if (errorReported) {
+                    return;
+                }
+                long latency = System.currentTimeMillis() - start;
+                ChatResponse response = ChatResponse.builder()
+                        .content(contentBuilder.toString())
+                        .model(request.getModel())
+                        .finishReason("stop")
+                        .latencyMs(latency)
+                        .build();
+                try {
+                    callback.onComplete(response);
+                } catch (RuntimeException e) {
+                    reportCallbackError(e);
+                }
+            }
+
+            @Override
+            public void onError(LlmApiException e) {
+                if (errorReported) {
+                    log.warn("streamChat 重复收到 onError: type={}, msg={}", e.getType(), e.getMessage());
+                    return;
+                }
+                errorReported = true;
+                callback.onError(e);
+            }
+        });
     }
 }

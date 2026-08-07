@@ -78,7 +78,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ChatMessageResponse createAssistantMessage(Long sessionId, String content, String model,
-                                                       String tokenUsage, String finishReason) {
+                                                       String tokenUsage, String finishReason, Integer latencyMs) {
         ChatSessionEntity session = chatSessionMapper.selectById(sessionId);
         if (session == null) {
             throw new BizException(ErrorCode.CONVERSATION_NOT_FOUND, "sessionId=" + sessionId);
@@ -93,6 +93,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         entity.setModel(model);
         entity.setTokenUsage(tokenUsage);
         entity.setFinishReason(finishReason);
+        entity.setLatencyMs(latencyMs);
         entity.setSeq(nextSeq);
         chatMessageMapper.insert(entity);
 
@@ -121,6 +122,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 .content(entity.getContent())
                 .model(entity.getModel())
                 .finishReason(entity.getFinishReason())
+                .latencyMs(entity.getLatencyMs())
                 .toolCalls(entity.getToolCalls())
                 .toolCallId(entity.getToolCallId())
                 .fallback(entity.getFallback())
