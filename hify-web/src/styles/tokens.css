@@ -1,0 +1,244 @@
+/* ===================================================================
+ * Hify Design System · CSS Custom Properties
+ * ===================================================================
+ * 视觉参考：Linear + Supabase — 干净、科技感、不花哨
+ * 配色方向：蓝紫主色 + 青绿辅色 / 浅底 + 深侧栏
+ * =================================================================== */
+
+:root {
+  /* =================================================================
+   * 1. 主色 — 蓝紫系（Indigo-Violet）
+   *    品牌色、主按钮、链接、选中态、活跃指示
+   * ================================================================= */
+  --hify-primary-50:  #f0f1ff;
+  --hify-primary-100: #e0e3ff;
+  --hify-primary-200: #c4c9ff;
+  --hify-primary-300: #9ea5ff;
+  --hify-primary-400: #7c7eff;
+  --hify-primary-500: #6359ff;  /* ← 品牌主色 */
+  --hify-primary-600: #5746e8;
+  --hify-primary-700: #4a38c7;
+  --hify-primary-800: #3d30a0;
+  --hify-primary-900: #342d80;
+  --hify-primary-950: #1f1a4a;
+
+  /* 常用语义别名 */
+  --hify-brand:            var(--hify-primary-500);
+  --hify-brand-hover:      var(--hify-primary-600);
+  --hify-brand-active:     var(--hify-primary-700);
+  --hify-brand-light:      var(--hify-primary-50);
+  --hify-brand-subtle:     var(--hify-primary-100);
+
+  /* =================================================================
+   * 2. 辅色 — 青绿系（Cyan-Teal）
+   *    数据可视化、状态指示（成功/在线）、辅助按钮
+   * ================================================================= */
+  --hify-accent-50:  #f0fdf9;
+  --hify-accent-100: #cdfaeb;
+  --hify-accent-200: #9cf3d8;
+  --hify-accent-300: #5de7c0;
+  --hify-accent-400: #2dd4a8;
+  --hify-accent-500: #12b88a;  /* ← 辅助强调色 */
+  --hify-accent-600: #0d9470;
+  --hify-accent-700: #0f765c;
+  --hify-accent-800: #115e4a;
+  --hify-accent-900: #134e3e;
+  --hify-accent-950: #052e25;
+
+  /* 常用语义别名 */
+  --hify-accent:            var(--hify-accent-500);
+  --hify-accent-hover:      var(--hify-accent-600);
+  --hify-accent-light:      var(--hify-accent-50);
+  --hify-accent-subtle:     var(--hify-accent-100);
+
+  /* =================================================================
+   * 3. 中性色 — 冷灰阶（Cool Gray）
+   *    文字层级、边框、禁用态、骨架屏
+   * ================================================================= */
+  --hify-gray-50:  #f8f9fb;
+  --hify-gray-100: #f1f3f7;
+  --hify-gray-200: #e4e7ee;
+  --hify-gray-300: #cdd2de;
+  --hify-gray-400: #a6aec1;
+  --hify-gray-500: #848da1;
+  --hify-gray-600: #6b7390;
+  --hify-gray-700: #585e7a;
+  --hify-gray-800: #4a4f68;
+  --hify-gray-900: #404458;
+  --hify-gray-950: #25273a;
+
+  /* =================================================================
+   * 4. 背景色阶
+   *    page = 页面底色 / container = 卡片面板 / elevated = 浮层
+   * ================================================================= */
+  --color-bg-dark:          #0c0e14;   /* 近纯黑深色底（侧栏/暗色面板） */
+  --color-bg-secondary:     #eff1f5;   /* 内容区浅灰底，托起白色卡片 */
+  --hify-bg-page:           #f8f9fb;   /* 页面底色，略灰，和白色卡片拉开层次 */
+  --hify-bg-container:      #ffffff;   /* 卡片、表格、表单容器 */
+  --hify-bg-elevated:       #ffffff;   /* 弹窗、下拉菜单（阴影区分） */
+  --hify-bg-sidebar:        var(--color-bg-dark);   /* 侧边栏深色底 */
+  --hify-bg-sidebar-hover:  rgba(255, 255, 255, 0.06);
+  --hify-bg-sidebar-active: rgba(99, 89, 255, 0.15);
+  --hify-bg-hover:          var(--hify-gray-100);
+  --hify-bg-active:         var(--hify-primary-50);
+  --hify-bg-mask:           rgba(0, 0, 0, 0.45);  /* 遮罩层 */
+
+  /* =================================================================
+   * 5. 文字色阶
+   *    四级：主/次/辅助/禁用 + 反色 + 侧栏专用
+   * ================================================================= */
+  --hify-text-primary:      #1a1c2e;   /* 标题、正文 */
+  --hify-text-secondary:    #585e7a;   /* 描述、辅助说明 */
+  --hify-text-tertiary:     #848da1;   /* 占位符、水印 */
+  --hify-text-disabled:     #a6aec1;   /* 禁用态 */
+  --hify-text-inverse:      #ffffff;   /* 深色底上文字 */
+  --hify-text-sidebar:      #bfcbd9;   /* 侧栏菜单默认 */
+  --hify-text-sidebar-active: #ffffff; /* 侧栏菜单选中 */
+  --hify-text-brand:        var(--hify-primary-500);
+  --hify-text-accent:       var(--hify-accent-500);
+  --hify-text-link:         var(--hify-primary-500);
+  --hify-text-link-hover:   var(--hify-primary-600);
+
+  /* =================================================================
+   * 6. 边框
+   * ================================================================= */
+  --hify-border-light:      var(--hify-gray-100);
+  --hify-border-default:    var(--hify-gray-200);
+  --hify-border-strong:     var(--hify-gray-300);
+  --hify-border-focus:      var(--hify-primary-400);
+
+  /* =================================================================
+   * 7. 状态色 — 语义不变
+   * ================================================================= */
+  --hify-success:           #12b88a;   /* 同 accent-500 */
+  --hify-success-light:     #f0fdf9;
+  --hify-warning:           #f59e0b;
+  --hify-warning-light:     #fffbeb;
+  --hify-error:             #ef4444;
+  --hify-error-light:       #fef2f2;
+  --hify-info:              var(--hify-primary-500);
+  --hify-info-light:        var(--hify-primary-50);
+
+  /* =================================================================
+   * 8. 圆角
+   *    sm=标签/badge  md=按钮/输入框  lg=卡片  xl=面板  full=胶囊
+   * ================================================================= */
+  --hify-radius-sm:         4px;
+  --hify-radius-md:         6px;
+  --hify-radius-lg:         8px;
+  --hify-radius-xl:         12px;
+  --hify-radius-2xl:        16px;
+  --hify-radius-full:       9999px;
+
+  /* 组件别名 */
+  --hify-radius-input:      var(--hify-radius-md);
+  --hify-radius-btn:        var(--hify-radius-md);
+  --hify-radius-card:       var(--hify-radius-lg);
+  --hify-radius-modal:      var(--hify-radius-xl);
+  --hify-radius-tag:        var(--hify-radius-sm);
+  --hify-radius-badge:      var(--hify-radius-full);
+
+  /* =================================================================
+   * 9. 阴影
+   *    层级递增，用于浮层、弹窗、抽屉
+   * ================================================================= */
+  --hify-shadow-xs:  0 1px 2px  rgba(0, 0, 0, 0.04);
+  --hify-shadow-sm:  0 1px 3px  rgba(0, 0, 0, 0.06),
+                     0 1px 2px  rgba(0, 0, 0, 0.04);
+  --hify-shadow-md:  0 4px 8px  -1px rgba(0, 0, 0, 0.06),
+                     0 2px 4px  -1px rgba(0, 0, 0, 0.04);
+  --hify-shadow-lg:  0 10px 20px -3px rgba(0, 0, 0, 0.08),
+                     0 4px 8px   -2px rgba(0, 0, 0, 0.04);
+  --hify-shadow-xl:  0 20px 40px -5px rgba(0, 0, 0, 0.10),
+                     0 8px 16px  -4px rgba(0, 0, 0, 0.04);
+
+  /* 语义别名 */
+  --hify-shadow-dropdown:   var(--hify-shadow-md);
+  --hify-shadow-modal:      var(--hify-shadow-xl);
+  --hify-shadow-card:       var(--hify-shadow-sm);
+  --hify-shadow-card-hover: var(--hify-shadow-md);
+
+  /* =================================================================
+   * 10. 过渡（Transition）
+   *     fast=微交互  base=常规  slow=展开动画  spring=弹跳
+   * ================================================================= */
+  --hify-ease-out:          cubic-bezier(0.16, 1, 0.3, 1);
+  --hify-ease-in-out:       cubic-bezier(0.4, 0, 0.2, 1);
+  --hify-ease-spring:       cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --hify-transition-fast:   150ms var(--hify-ease-in-out);
+  --hify-transition-base:   200ms var(--hify-ease-in-out);
+  --hify-transition-slow:   300ms var(--hify-ease-in-out);
+  --hify-transition-spring: 400ms var(--hify-ease-spring);
+
+  /* 语义别名 */
+  --hify-transition-hover:      var(--hify-transition-fast);
+  --hify-transition-fade:       var(--hify-transition-base);
+  --hify-transition-expand:     var(--hify-transition-slow);
+  --hify-transition-modal:      var(--hify-transition-spring);
+
+  /* =================================================================
+   * 11. 字体
+   * ================================================================= */
+  --hify-font-sans: 'Inter', -apple-system, BlinkMacSystemFont,
+                    'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+                    'Noto Sans SC', sans-serif;
+  --hify-font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code',
+                    'SF Mono', Consolas, monospace;
+
+  /* 字号阶梯 */
+  --hify-font-size-xs:      12px;
+  --hify-font-size-sm:      13px;
+  --hify-font-size-base:    14px;
+  --hify-font-size-md:      15px;
+  --hify-font-size-lg:      16px;
+  --hify-font-size-xl:      20px;
+  --hify-font-size-2xl:     24px;
+  --hify-font-size-3xl:     30px;
+  --hify-font-size-4xl:     38px;
+
+  /* 行高 */
+  --hify-line-height-tight: 1.25;  /* 标题 */
+  --hify-line-height-base:  1.5;   /* 正文 */
+  --hify-line-height-loose: 1.75;  /* 长文本 */
+
+  /* =================================================================
+   * 12. 间距（4px 基准）
+   * ================================================================= */
+  --hify-space-0:            0;
+  --hify-space-1:            4px;
+  --hify-space-2:            8px;
+  --hify-space-3:            12px;
+  --hify-space-4:            16px;
+  --hify-space-5:            20px;
+  --hify-space-6:            24px;
+  --hify-space-8:            32px;
+  --hify-space-10:           40px;
+  --hify-space-12:           48px;
+  --hify-space-16:           64px;
+  --hify-space-20:           80px;
+
+  /* 常用组合别名 */
+  --hify-page-padding:       var(--hify-space-6);  /* 页面外边距 24px */
+  --hify-card-padding:       var(--hify-space-5);  /* 卡片内边距 20px */
+  --hify-section-gap:        var(--hify-space-4);  /* 元素/区块间距 16px */
+  --hify-content-padding:    var(--hify-space-6);  /* 兼容别名 */
+  --hify-header-height:      56px;
+  --hify-sidebar-width:      220px;
+
+  /* =================================================================
+   * 13. 尺寸
+   * ================================================================= */
+  --hify-size-input:         32px;  /* 输入框/按钮默认高度 */
+  --hify-size-input-sm:      28px;
+  --hify-size-input-lg:      40px;
+
+  /* =================================================================
+   * 14. 其他
+   * ================================================================= */
+  --hify-z-sidebar:          100;
+  --hify-z-dropdown:         200;
+  --hify-z-modal:            300;
+  --hify-z-toast:            400;
+  --hify-z-tooltip:          500;
+}

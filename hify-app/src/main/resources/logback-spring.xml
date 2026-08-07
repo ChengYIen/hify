@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="false">
+
+    <!-- ================================================================ -->
+    <!-- 开发环境：控制台彩色输出                                          -->
+    <!-- ================================================================ -->
+    <springProfile name="dev">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+                <pattern>%d{HH:mm:ss} [%thread] [%X{traceId}] %highlight(%-5level) %cyan(%logger{20}) - %msg%n</pattern>
+                <charset>UTF-8</charset>
+            </encoder>
+        </appender>
+
+        <!-- MyBatis SQL 日志（调试用） -->
+        <logger name="org.apache.ibatis" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+        </logger>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- ================================================================ -->
+    <!-- 生产环境：JSON 格式输出到文件，按天滚动，保留 30 天               -->
+    <!-- ================================================================ -->
+    <springProfile name="prod">
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>logs/hify.log</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <!-- 按天滚动 -->
+                <fileNamePattern>logs/hify.%d{yyyy-MM-dd}.log</fileNamePattern>
+                <!-- 保留 30 天 -->
+                <maxHistory>30</maxHistory>
+                <!-- 最多 10GB 总大小 -->
+                <totalSizeCap>10GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!-- 时区设置为 Asia/Shanghai（UTC+8） -->
+                <timeZone>Asia/Shanghai</timeZone>
+                <!-- 自定义字段名，使其更简洁 -->
+                <fieldNames>
+                    <timestamp>timestamp</timestamp>
+                    <version>[ignore]</version>
+                    <level>level</level>
+                    <thread>thread</thread>
+                    <logger>logger</logger>
+                    <message>message</message>
+                </fieldNames>
+            </encoder>
+        </appender>
+
+        <root level="WARN">
+            <appender-ref ref="FILE"/>
+        </root>
+    </springProfile>
+
+</configuration>

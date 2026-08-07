@@ -1,11 +1,14 @@
-<template>
-  <div class="page-placeholder">对话</div>
-</template>
+<script setup lang="ts">
+import PageHeader from '@/components/common/PageHeader.vue'
+</script>
 
-<style scoped>
-.page-placeholder {
-  font-size: 24px;
-  color: #303133;
-  padding: 24px;
-}
-</style>
+<template>
+  <PageHeader
+    title="对话"
+    description="与 AI Agent 进行实时对话，支持流式输出和工具调用"
+  >
+    <template #actions>
+      <el-button type="primary">新建对话</el-button>
+    </template>
+  </PageHeader>
+</template>

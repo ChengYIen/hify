@@ -34,7 +34,7 @@
 
         <!-- 框架版本 -->
         <spring-boot.version>3.3.5</spring-boot.version>
-        <mybatis-plus.version>3.5.9</mybatis-plus.version>
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
 
         <!-- 数据库驱动 -->
         <mysql-connector.version>8.0.33</mysql-connector.version>
@@ -45,9 +45,19 @@
         <resilience4j.version>2.2.0</resilience4j.version>
         <spring-retry.version>2.0.9</spring-retry.version>
 
+        <!-- 日志 -->
+        <logstash-logback-encoder.version>8.0</logstash-logback-encoder.version>
+
         <!-- 工具库 -->
         <lombok.version>1.18.46</lombok.version>
         <hutool.version>5.8.32</hutool.version>
+        <okhttp.version>4.12.0</okhttp.version>
+
+        <!-- Flyway -->
+        <flyway.version>10.17.1</flyway.version>
+
+        <!-- JWT -->
+        <jjwt.version>0.12.6</jjwt.version>
 
         <!-- 插件版本 -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -65,10 +75,10 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- MyBatis-Plus -->
+            <!-- MyBatis-Plus（Spring Boot 3 专用 starter） -->
             <dependency>
                 <groupId>com.baomidou</groupId>
-                <artifactId>mybatis-plus-boot-starter</artifactId>
+                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
                 <version>${mybatis-plus.version}</version>
             </dependency>
             <!-- MyBatis-Plus JSqlParser（分页插件依赖，3.5.9+ 从核心模块分离） -->
@@ -106,6 +116,13 @@
                 <version>${resilience4j.version}</version>
             </dependency>
 
+            <!-- Logstash Logback Encoder（JSON 日志） -->
+            <dependency>
+                <groupId>net.logstash.logback</groupId>
+                <artifactId>logstash-logback-encoder</artifactId>
+                <version>${logstash-logback-encoder.version}</version>
+            </dependency>
+
             <!-- Spring Retry -->
             <dependency>
                 <groupId>org.springframework.retry</groupId>
@@ -118,6 +135,44 @@
                 <groupId>cn.hutool</groupId>
                 <artifactId>hutool-all</artifactId>
                 <version>${hutool.version}</version>
+            </dependency>
+
+            <!-- Flyway（数据库迁移） -->
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-core</artifactId>
+                <version>${flyway.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-mysql</artifactId>
+                <version>${flyway.version}</version>
+            </dependency>
+
+            <!-- JWT（jjwt 0.12+ 拆为三个模块） -->
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+
+            <!-- OkHttp（SSE 流式调用） -->
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>okhttp</artifactId>
+                <version>${okhttp.version}</version>
             </dependency>
 
             <!-- Lombok -->
@@ -199,6 +254,7 @@
                         <source>${java.version}</source>
                         <target>${java.version}</target>
                         <encoding>${project.build.sourceEncoding}</encoding>
+                        <parameters>true</parameters>
                         <annotationProcessorPaths>
                             <path>
                                 <groupId>org.projectlombok</groupId>

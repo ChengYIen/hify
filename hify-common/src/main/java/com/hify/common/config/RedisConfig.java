@@ -1,5 +1,6 @@
 package com.hify.common.config;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -14,8 +15,12 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
  * key 使用 String 序列化，value 使用 JSON 序列化（Jackson），
  * 避免默认 JDK 序列化导致的可读性问题。
  * </p>
+ * <p>
+ * 仅在 Redis 连接工厂可用时生效（Redis 不可用时自动降级，不阻塞启动）。
+ * </p>
  */
 @Configuration
+@ConditionalOnBean(RedisConnectionFactory.class)
 public class RedisConfig {
 
     /**

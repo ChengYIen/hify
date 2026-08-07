@@ -2,6 +2,7 @@ package com.hify.common.util;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -15,9 +16,13 @@ import java.util.concurrent.TimeUnit;
  * 封装常用的 Redis 操作：get / set / delete / expire / hasKey。
  * 方法层面做了空值防护和异常日志，不吞异常，由调用方决定降级策略。
  * </p>
+ * <p>
+ * 仅在 {@link RedisTemplate} Bean 存在时生效（Redis 不可用时自动降级）。
+ * </p>
  */
 @Slf4j
 @Component
+@ConditionalOnBean(RedisTemplate.class)
 @RequiredArgsConstructor
 public class RedisUtil {
 

@@ -3,9 +3,8 @@ package com.hify;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.JdbcTemplateAutoConfiguration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -16,16 +15,16 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * 启用异步（LLM 调用与请求线程隔离）和定时任务（线程池监控）。
  * </p>
  * <p>
- * 暂时排除数据源自动配置（后续在 provider 模块中手动配置 MySQL + PostgreSQL 双数据源）。
+ * 排除 {@link DataSourceAutoConfiguration} —— 双数据源（MySQL + PostgreSQL）
+ * 由 {@link com.hify.common.config.DataSourceConfig} 手动装配。
  * </p>
  */
 @Slf4j
 @EnableAsync
 @EnableScheduling
+@MapperScan({"com.hify.**.mapper", "com.hify.**.repository"})
 @SpringBootApplication(exclude = {
-        DataSourceAutoConfiguration.class,
-        DataSourceTransactionManagerAutoConfiguration.class,
-        JdbcTemplateAutoConfiguration.class
+        DataSourceAutoConfiguration.class
 })
 public class HifyApplication {
 

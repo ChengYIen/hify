@@ -1,0 +1,297 @@
+/* ===================================================================
+ * Hify Global Styles
+ * ===================================================================
+ * 1. 将设计令牌映射到 Element Plus CSS 变量
+ * 2. 全局排版、滚动条、Selection 等基础样式
+ * =================================================================== */
+
+/* ===================================================================
+ * §A — Element Plus 主题覆盖
+ * 利用 el-* CSS 变量系统，无缝对接设计令牌
+ * =================================================================== */
+:root {
+  /* --- 主色 --- */
+  --el-color-primary:              var(--hify-primary-500);
+  --el-color-primary-light-3:      var(--hify-primary-400);
+  --el-color-primary-light-5:      var(--hify-primary-300);
+  --el-color-primary-light-7:      var(--hify-primary-200);
+  --el-color-primary-light-8:      var(--hify-primary-100);
+  --el-color-primary-light-9:      var(--hify-primary-50);
+  --el-color-primary-dark-2:       var(--hify-primary-700);
+
+  /* --- 成功色 → 青绿 --- */
+  --el-color-success:              var(--hify-success);
+  --el-color-success-light-3:      var(--hify-accent-400);
+  --el-color-success-light-5:      var(--hify-accent-300);
+  --el-color-success-light-7:      var(--hify-accent-200);
+  --el-color-success-light-9:      var(--hify-accent-100);
+
+  /* --- 警告色 --- */
+  --el-color-warning:              var(--hify-warning);
+  --el-color-warning-light-3:      #f7b73c;
+  --el-color-warning-light-5:      #fac858;
+  --el-color-warning-light-7:      #fde29a;
+  --el-color-warning-light-9:      #fff4d9;
+
+  /* --- 危险色 --- */
+  --el-color-danger:               var(--hify-error);
+  --el-color-danger-light-3:       #f26b6b;
+  --el-color-danger-light-5:       #f58f8f;
+  --el-color-danger-light-7:       #f9b5b5;
+  --el-color-danger-light-9:       #fde2e2;
+
+  /* --- 信息色 --- */
+  --el-color-info:                 var(--hify-info);
+  --el-color-info-light-3:         var(--hify-primary-400);
+  --el-color-info-light-5:         var(--hify-primary-300);
+  --el-color-info-light-7:         var(--hify-primary-200);
+  --el-color-info-light-9:         var(--hify-primary-100);
+
+  /* --- 边框 --- */
+  --el-border-color:               var(--hify-border-default);
+  --el-border-color-light:         var(--hify-border-light);
+  --el-border-color-lighter:       var(--hify-border-light);
+  --el-border-color-extra-light:   var(--hify-bg-page);
+  --el-border-color-dark:          var(--hify-border-strong);
+
+  /* --- 文字 --- */
+  --el-text-color-primary:         var(--hify-text-primary);
+  --el-text-color-regular:         var(--hify-text-secondary);
+  --el-text-color-secondary:       var(--hify-text-tertiary);
+  --el-text-color-placeholder:     var(--hify-text-tertiary);
+  --el-text-color-disabled:        var(--hify-text-disabled);
+
+  /* --- 背景 --- */
+  --el-bg-color:                   var(--hify-bg-container);
+  --el-bg-color-page:              var(--hify-bg-page);
+  --el-bg-color-overlay:           var(--hify-bg-container);
+  --el-fill-color-blank:           var(--hify-bg-container);
+  --el-fill-color:                 var(--hify-gray-100);
+  --el-fill-color-light:           var(--hify-gray-50);
+  --el-fill-color-lighter:         var(--hify-gray-50);
+
+  /* --- 圆角 --- */
+  --el-border-radius-base:         var(--hify-radius-md);
+  --el-border-radius-small:        var(--hify-radius-sm);
+  --el-border-radius-round:        var(--hify-radius-full);
+  --el-border-radius-circle:       var(--hify-radius-full);
+
+  /* --- 字体 --- */
+  --el-font-family:                var(--hify-font-sans);
+  --el-font-size-extra-large:      var(--hify-font-size-xl);
+  --el-font-size-large:            var(--hify-font-size-lg);
+  --el-font-size-base:             var(--hify-font-size-base);
+  --el-font-size-small:            var(--hify-font-size-sm);
+  --el-font-size-extra-small:      var(--hify-font-size-xs);
+
+  /* --- 阴影 --- */
+  --el-box-shadow-light:           var(--hify-shadow-sm);
+  --el-box-shadow-lighter:         var(--hify-shadow-xs);
+  --el-box-shadow-dark:            var(--hify-shadow-lg);
+  --el-box-shadow:                 var(--hify-shadow-md);
+
+  /* --- 其他 --- */
+  --el-disabled-bg-color:          var(--hify-gray-100);
+  --el-disabled-text-color:        var(--hify-text-disabled);
+  --el-disabled-border-color:      var(--hify-border-light);
+}
+
+/* ===================================================================
+ * §B — 全局排版与重置
+ * =================================================================== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--hify-font-sans);
+  font-size: var(--hify-font-size-base);
+  line-height: var(--hify-line-height-base);
+  color: var(--hify-text-primary);
+  background-color: var(--hify-bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* ===================================================================
+ * §C — 滚动条美化（Webkit）
+ * =================================================================== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hify-gray-300);
+  border-radius: var(--hify-radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--hify-gray-400);
+}
+
+/* ===================================================================
+ * §D — 选中态与聚焦环
+ * =================================================================== */
+::selection {
+  background: var(--hify-primary-100);
+  color: var(--hify-text-primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--hify-primary-400);
+  outline-offset: 2px;
+}
+
+/* ===================================================================
+ * §E — Element Plus 组件微调
+ * =================================================================== */
+
+/* 菜单深色变体（侧栏用） */
+.el-menu--vertical,
+.el-menu {
+  --el-menu-bg-color:              var(--hify-bg-sidebar);
+  --el-menu-text-color:            var(--hify-text-sidebar);
+  --el-menu-active-color:          var(--hify-text-sidebar-active);
+  --el-menu-hover-bg-color:        var(--hify-bg-sidebar-hover);
+  --el-menu-item-height:           44px;
+  --el-menu-item-font-size:        var(--hify-font-size-base);
+}
+
+/* 表格 */
+.el-table {
+  --el-table-border-color:         var(--hify-border-light);
+  --el-table-header-bg-color:      var(--color-bg-secondary);
+  --el-table-row-hover-bg-color:   var(--hify-bg-hover);
+  --el-table-current-row-bg-color: var(--hify-bg-active);
+  font-size: var(--hify-font-size-base);
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: var(--hify-text-secondary);
+  font-size: var(--hify-font-size-sm);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* 卡片 */
+.el-card {
+  border-radius: var(--hify-radius-card);
+  box-shadow: var(--hify-shadow-card);
+  border: 1px solid var(--hify-border-light);
+}
+
+/* 弹窗 */
+.el-dialog {
+  border-radius: var(--hify-radius-xl);
+  --el-dialog-box-shadow: var(--hify-shadow-modal);
+}
+
+/* ---- 按钮基础 ---- */
+.el-button {
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  transition: all var(--hify-transition-fast);
+}
+
+/* ---- 主要按钮：蓝紫渐变 ---- */
+.el-button--primary {
+  --el-button-text-color:          #fff;
+  --el-button-bg-color:            var(--hify-primary-500);
+  --el-button-border-color:        transparent;
+  --el-button-hover-text-color:    #fff;
+  --el-button-hover-bg-color:      var(--hify-primary-600);
+  --el-button-hover-border-color:  transparent;
+  --el-button-active-text-color:   #fff;
+  --el-button-active-bg-color:     var(--hify-primary-700);
+  --el-button-active-border-color: transparent;
+  background-image: linear-gradient(135deg, var(--hify-primary-500), var(--hify-primary-600));
+  border: none;
+  box-shadow: 0 2px 8px rgba(99, 89, 255, 0.25);
+}
+
+.el-button--primary:hover {
+  background-image: linear-gradient(135deg, var(--hify-primary-600), var(--hify-primary-700));
+  box-shadow: 0 4px 14px rgba(99, 89, 255, 0.35);
+}
+
+.el-button--primary:active {
+  background-image: linear-gradient(135deg, var(--hify-primary-700), var(--hify-primary-800));
+  box-shadow: 0 1px 4px rgba(99, 89, 255, 0.2);
+}
+
+.el-button--primary.is-disabled,
+.el-button--primary.is-disabled:hover {
+  background-image: linear-gradient(135deg, var(--hify-primary-300), var(--hify-primary-400));
+  box-shadow: none;
+}
+
+/* ---- 次要按钮：白色 + 边框 ---- */
+.el-button--default {
+  --el-button-bg-color:            var(--hify-bg-container);
+  --el-button-border-color:        var(--hify-border-default);
+  --el-button-text-color:          var(--hify-text-secondary);
+  --el-button-hover-bg-color:      var(--hify-gray-50);
+  --el-button-hover-border-color:  var(--hify-primary-300);
+  --el-button-hover-text-color:    var(--hify-primary-600);
+  --el-button-active-bg-color:     var(--hify-primary-50);
+  --el-button-active-border-color: var(--hify-primary-400);
+  --el-button-active-text-color:   var(--hify-primary-700);
+}
+
+/* ---- 危险按钮 ---- */
+.el-button--danger {
+  --el-button-bg-color:            var(--hify-error);
+  --el-button-border-color:        var(--hify-error);
+  --el-button-hover-bg-color:      #dc2626;
+  --el-button-hover-border-color:  #dc2626;
+  --el-button-active-bg-color:     #b91c1c;
+  --el-button-active-border-color: #b91c1c;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.2);
+}
+
+.el-button--danger:hover {
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+/* ---- 朴素按钮（文字 + 背景色变体，用于表格行操作） ---- */
+.el-button--primary.is-plain {
+  --el-button-text-color:          var(--hify-primary-600);
+  --el-button-bg-color:            var(--hify-primary-50);
+  --el-button-border-color:        var(--hify-primary-200);
+  --el-button-hover-text-color:    #fff;
+  --el-button-hover-bg-color:      var(--hify-primary-500);
+  --el-button-hover-border-color:  var(--hify-primary-500);
+}
+
+/* 输入框 */
+.el-input__wrapper {
+  border-radius: var(--hify-radius-input);
+  transition: box-shadow var(--hify-transition-fast),
+              border-color var(--hify-transition-fast);
+}
+
+/* 标签 */
+.el-tag {
+  border-radius: var(--hify-radius-tag);
+  font-weight: 500;
+}
+
+/* 下拉菜单 */
+.el-dropdown-menu {
+  border-radius: var(--hify-radius-lg);
+  box-shadow: var(--hify-shadow-dropdown);
+  border: 1px solid var(--hify-border-light);
+}

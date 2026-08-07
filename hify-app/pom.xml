@@ -17,6 +17,12 @@
     <description>Spring Boot 启动入口，组装所有模块</description>
 
     <dependencies>
+        <!-- 全局基础设施（直接使用 UserMapper / JwtUtil 等） -->
+        <dependency>
+            <groupId>com.hify</groupId>
+            <artifactId>hify-common</artifactId>
+        </dependency>
+
         <!-- 组装所有业务模块 -->
         <dependency>
             <groupId>com.hify</groupId>

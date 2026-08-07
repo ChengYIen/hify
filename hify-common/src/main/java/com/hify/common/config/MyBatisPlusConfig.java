@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Configuration;
  * 包含分页插件；逻辑删除、驼峰映射、mapper 路径等由 application.yml 管理。
  */
 @Configuration
-@MapperScan("com.hify.module.**.repository")
+@MapperScan({"com.hify.module.**.repository", "com.hify.common.mapper"})
 public class MyBatisPlusConfig {
 
     /**

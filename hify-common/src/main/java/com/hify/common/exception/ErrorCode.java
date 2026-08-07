@@ -83,6 +83,25 @@ public enum ErrorCode {
     LLM_ALL_MODELS_FAILED(70004, "所有模型均调用失败"),
     MCP_TOOL_NOT_FOUND(70005, "MCP 工具不存在"),
     MCP_TOOL_EXECUTION_FAILED(70006, "MCP 工具执行失败"),
+    MCP_SERVER_UNAVAILABLE(70007, "MCP 服务器不可用"),
+    MCP_TRANSPORT_NOT_SUPPORTED(70008, "不支持的传输协议"),
+
+    // ======================== Auth 10104–10199 ========================
+    AUTH_USERNAME_EXISTS(10104, "用户名已存在"),
+    AUTH_CREDENTIALS_INVALID(10105, "用户名或密码错误"),
+
+    // ======================== Agent 补充 ========================
+    AGENT_TOOL_NOT_FOUND(30004, "Agent 工具不存在"),
+
+    // ======================== Conversation 补充 ========================
+    SESSION_AGENT_MISMATCH(40004, "会话与 Agent 不匹配"),
+
+    // ======================== Knowledge 补充 ========================
+    DOCUMENT_NOT_FOUND(50004, "文档不存在"),
+
+    // ======================== Workflow 补充 ========================
+    WORKFLOW_INVALID_DEFINITION(60004, "工作流定义格式无效"),
+    WORKFLOW_ALREADY_RUNNING(60005, "工作流正在执行中"),
     ;
 
     /** 错误码 */

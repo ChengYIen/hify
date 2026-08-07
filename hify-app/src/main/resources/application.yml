@@ -7,7 +7,7 @@ spring:
   datasource:
     mysql:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/hify?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai
+      jdbc-url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/hify?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
       username: ${MYSQL_USER:root}
       password: ${MYSQL_PASSWORD:}
     # --- 数据源：PostgreSQL（向量数据） ---
@@ -35,6 +35,10 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 50MB
+
+  # --- Flyway（数据库迁移） ---
+  flyway:
+    enabled: false
 
 # ======================== MyBatis-Plus ========================
 mybatis-plus:
@@ -74,8 +78,8 @@ hify:
       total: 90s
     retry:
       max-attempts: 3
-      initial-delay: 1000ms
-      max-delay: 30s
+      initial-delay: 1000
+      max-delay: 30000
       multiplier: 2.0
       jitter: 0.3
     agent:
@@ -90,10 +94,10 @@ resilience4j:
     configs:
       llm-default:
         sliding-window-type: COUNT_BASED
-        sliding-window-size: 20
+        sliding-window-size: 10
         failure-rate-threshold: 50
         wait-duration-in-open-state: 30s
-        permitted-number-of-calls-in-half-open-state: 2
+        permitted-number-of-calls-in-half-open-state: 3
         automatic-transition-from-open-to-half-open-enabled: true
         record-exceptions:
           - java.net.ConnectException
@@ -107,5 +111,3 @@ resilience4j:
         base-config: llm-default
       ollama:
         base-config: llm-default
-        failure-rate-threshold: 60
-        wait-duration-in-open-state: 15s
