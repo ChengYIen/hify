@@ -31,10 +31,12 @@ public interface LlmProviderApi {
      * 流式发送对话请求（SSE），通过回调逐块返回增量.
      *
      * <p>方法可能立即返回（底层异步），增量文本通过 {@link LlmStreamCallback#onContent}
-     * 实时回调，流结束时回调 {@link LlmStreamCallback#onComplete}。</p>
+     * 实时回调，流结束时回调 {@link LlmStreamCallback#onComplete}。
+     * 返回的 {@link LlmStreamHandle} 供调用方在客户端断开 / 超时时取消进行中的调用。</p>
      *
      * @param request  统一请求体（含 modelId、消息列表、采样参数）
      * @param callback 流式回调
+     * @return 流式调用句柄（用于取消）；baseUrl 缺失等立即失败场景返回 null
      */
-    void streamChat(LlmRequestDTO request, LlmStreamCallback callback);
+    LlmStreamHandle streamChat(LlmRequestDTO request, LlmStreamCallback callback);
 }

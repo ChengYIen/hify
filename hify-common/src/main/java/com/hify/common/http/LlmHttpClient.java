@@ -186,14 +186,16 @@ public class LlmHttpClient {
      * <p>
      * 方法立即返回，不阻塞调用线程。SSE 数据在 OkHttp 内部线程池中读取后回调。
      * 自动跳过空行和事件边界标记，只提取 {@code data:} 前缀后的内容。
+     * 返回 {@link Call} 供调用方在客户端断开等场景主动 {@code cancel()} 中断请求。
      * </p>
      *
      * @param url      请求 URL
      * @param headers  请求头
      * @param body     请求体（JSON 字符串）
      * @param callback 逐行回调
+     * @return 已 enqueue 的 {@link Call}，可随时取消
      */
-    public void stream(String url, Map<String, String> headers, String body, StreamCallback callback) {
+    public Call stream(String url, Map<String, String> headers, String body, StreamCallback callback) {
         long start = System.currentTimeMillis();
 
         Headers okHeaders = Headers.of(headers);
@@ -203,7 +205,8 @@ public class LlmHttpClient {
                 .post(RequestBody.create(body, JSON))
                 .build();
 
-        okHttpClient.newCall(request).enqueue(new Callback() {
+        Call call = okHttpClient.newCall(request);
+        call.enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
                 long elapsed = System.currentTimeMillis() - start;
@@ -256,6 +259,8 @@ public class LlmHttpClient {
                 }
             }
         });
+
+        return call;
     }
 
     // ================================================================

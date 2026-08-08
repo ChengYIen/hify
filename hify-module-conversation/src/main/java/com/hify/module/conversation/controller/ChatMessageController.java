@@ -7,7 +7,7 @@ import com.hify.common.web.Result;
 import com.hify.module.conversation.controller.dto.ChatMessageResponse;
 import com.hify.module.conversation.controller.dto.SendMessageRequest;
 import com.hify.module.conversation.service.ChatMessageService;
-import com.hify.module.conversation.service.ChatStreamService;
+import com.hify.module.conversation.service.ChatService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -30,7 +29,7 @@ import java.util.List;
 public class ChatMessageController {
 
     private final ChatMessageService chatMessageService;
-    private final ChatStreamService chatStreamService;
+    private final ChatService chatService;
 
     @GetMapping
     public PageResult<ChatMessageResponse> list(
@@ -61,8 +60,8 @@ public class ChatMessageController {
     public Object send(@PathVariable Long sessionId,
                        @Valid @RequestBody SendMessageRequest request) {
         if (Boolean.TRUE.equals(request.getStream())) {
-            return chatStreamService.streamMessage(sessionId, request.getContent());
+            return chatService.sendMessage(sessionId, request.getContent());
         }
-        return Result.ok(chatStreamService.sendBlocking(sessionId, request.getContent()));
+        return Result.ok(chatService.sendBlocking(sessionId, request.getContent()));
     }
 }

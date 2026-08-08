@@ -4,6 +4,7 @@ import com.hify.module.provider.adapter.dto.ChatRequest;
 import com.hify.module.provider.adapter.dto.ChatResponse;
 import com.hify.module.provider.controller.dto.ConnectionTestResult;
 import com.hify.module.provider.repository.entity.Provider;
+import okhttp3.Call;
 
 import java.util.List;
 
@@ -72,10 +73,12 @@ public interface ProviderAdapter {
      * <p>方法立即返回，不阻塞调用线程。适配器内部通过
      * {@link com.hify.common.http.LlmHttpClient#stream} 异步读取 SSE 流，
      * 解析后将增量文本回调给 {@link StreamChatCallback#onContent}，
-     * 流结束时回调 {@link StreamChatCallback#onComplete}。</p>
+     * 流结束时回调 {@link StreamChatCallback#onComplete}。
+     * 返回 {@link Call} 供调用方在客户端断开等场景 {@code cancel()} 中断底层请求。</p>
      *
      * @param request  统一请求体
      * @param callback 流式回调
+     * @return 已 enqueue 的 {@link Call}，可随时取消；立即失败场景返回 null
      */
-    void streamChat(ChatRequest request, StreamChatCallback callback);
+    Call streamChat(ChatRequest request, StreamChatCallback callback);
 }

@@ -17,4 +17,10 @@ public class SendMessageRequest {
      * false / 缺省 = 同步阻塞返回完整 {@code ChatMessageResponse}.
      */
     private Boolean stream;
+
+    /**
+     * 会话 ID，可选。为空时由服务端自动创建新会话
+     * （标题取首条消息摘要，模型取第一个可用模型）。
+     */
+    private Long sessionId;
 }

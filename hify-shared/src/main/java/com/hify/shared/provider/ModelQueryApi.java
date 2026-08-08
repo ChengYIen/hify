@@ -16,4 +16,14 @@ public interface ModelQueryApi {
      * @return true=模型存在且可用
      */
     boolean isModelAvailable(Long modelId);
+
+    /**
+     * 获取第一个可用的模型 ID（模型本身启用且所属提供商启用）.
+     *
+     * <p>供新建会话等需要"默认模型"的场景使用——客户端不指定模型时，
+     * 由调用方用本方法选一个可用模型兜底。</p>
+     *
+     * @return 第一个可用的模型 ID；无任何可用模型返回 null
+     */
+    Long getFirstEnabledModelId();
 }

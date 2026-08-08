@@ -10,6 +10,7 @@ import com.hify.module.provider.controller.dto.ConnectionTestResult;
 import com.hify.module.provider.repository.entity.AuthConfig;
 import com.hify.module.provider.repository.entity.Provider;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -268,12 +269,12 @@ public abstract class AbstractProviderAdapter implements ProviderAdapter {
     }
 
     @Override
-    public void streamChat(ChatRequest request, StreamChatCallback callback) {
+    public Call streamChat(ChatRequest request, StreamChatCallback callback) {
         String url = resolveUrl(request.getBaseUrl());
         if (url == null) {
             callback.onError(new LlmApiException(LlmApiException.Type.NETWORK_ERROR, 0, "",
                     "baseUrl 未配置且该厂商无默认地址"));
-            return;
+            return null;
         }
         String fullUrl = url + getChatEndpoint();
         Map<String, String> headers = buildChatHeaders(request.getApiKey());
@@ -295,7 +296,7 @@ public abstract class AbstractProviderAdapter implements ProviderAdapter {
         long start = System.currentTimeMillis();
         StringBuilder contentBuilder = new StringBuilder();
 
-        llmHttpClient.stream(fullUrl, headers, requestBody, new com.hify.common.http.StreamCallback() {
+        return llmHttpClient.stream(fullUrl, headers, requestBody, new com.hify.common.http.StreamCallback() {
 
             /** 是否已向回调上报错误，保证 onError 只触发一次，且之后不再回调 onContent/onComplete */
             private boolean errorReported;

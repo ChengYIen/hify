@@ -15,10 +15,12 @@ import com.hify.module.provider.repository.entity.ModelConfig;
 import com.hify.module.provider.repository.entity.Provider;
 import com.hify.shared.llm.LlmProviderApi;
 import com.hify.shared.llm.LlmStreamCallback;
+import com.hify.shared.llm.LlmStreamHandle;
 import com.hify.shared.llm.dto.LlmRequestDTO;
 import com.hify.shared.llm.dto.LlmResponseDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -73,12 +75,12 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
     }
 
     @Override
-    public void streamChat(LlmRequestDTO request, LlmStreamCallback callback) {
+    public LlmStreamHandle streamChat(LlmRequestDTO request, LlmStreamCallback callback) {
         ResolvedTarget target = resolveTarget(request.getModelId());
         ChatRequest chatRequest = toChatRequest(target, request, true);
 
         log.info("LLM 流式对话开始: modelId={}, provider={}", request.getModelId(), target.providerCode());
-        target.adapter().streamChat(chatRequest, new StreamChatCallback() {
+        Call call = target.adapter().streamChat(chatRequest, new StreamChatCallback() {
             @Override
             public void onContent(String delta) {
                 callback.onContent(delta);
@@ -98,6 +100,8 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                 callback.onError(formatError(e));
             }
         });
+        // 返回取消句柄：调用方在客户端断开 / 超时时 cancel() 底层 OkHttp 请求
+        return call != null ? call::cancel : () -> {};
     }
 
     // ================================================================
