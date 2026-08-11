@@ -120,7 +120,8 @@ function toggleCollapse() {
 
       <!-- 内容区 -->
       <main class="content">
-        <div class="content-card">
+        <!-- 对话页需要确定高度（内部消息区滚动 + 输入区固定），其余页面保持自动高度 -->
+        <div class="content-card" :class="{ 'content-card--fill': route.name === 'Conversation' }">
           <router-view />
         </div>
       </main>
@@ -339,5 +340,13 @@ function toggleCollapse() {
   border:          1px solid var(--hify-border-light);
   min-height:      calc(100% - 0px);
   padding:         var(--hify-card-padding);
+}
+
+/* 对话页：内容卡占满确定高度，页面不滚动，聊天内部滚动 */
+.content-card--fill {
+  height:       100%;
+  min-height:   0;
+  overflow:     hidden;
+  padding:      0;
 }
 </style>

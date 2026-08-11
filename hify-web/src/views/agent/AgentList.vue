@@ -247,7 +247,8 @@ async function handleSubmit(data: FormData): Promise<void> {
       temperature: data.temperature != null ? Number(data.temperature) : undefined,
       maxTokens: data.maxTokens != null ? Number(data.maxTokens) : undefined,
       maxIterations: data.maxContextTurns != null ? Number(data.maxContextTurns) : undefined,
-      toolsEnabled: selectedToolIds.length > 0 ? 1 : undefined,
+      // 取消全部工具时同步关闭工具调用（与创建路径一致，避免 toolsEnabled=1 但无工具绑定）
+      toolsEnabled: selectedToolIds.length > 0 ? 1 : 0,
       status: (data.status as string) || undefined,
     }
     await updateAgent(editingId.value, updateData)

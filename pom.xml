@@ -248,6 +248,16 @@
             <plugins>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <!-- 测试 fork 的 JVM 参数：JDK 25 下 Mockito inline mock 需要
+                             add-opens + ByteBuddy 实验模式（与 .mvn/jvm.config 对齐）；
+                             Java 17 上这些参数同样合法，无副作用 -->
+                        <argLine>-Xmx512m --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED -Dnet.bytebuddy.experimental=true</argLine>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
                     <version>${maven-compiler-plugin.version}</version>
                     <configuration>

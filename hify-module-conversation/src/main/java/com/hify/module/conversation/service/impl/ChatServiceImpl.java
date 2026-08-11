@@ -8,9 +8,13 @@ import com.hify.common.web.UserContext;
 import com.hify.module.conversation.controller.dto.ChatMessageResponse;
 import com.hify.module.conversation.controller.dto.ChatSessionCreateRequest;
 import com.hify.module.conversation.controller.dto.ChatSessionResponse;
+import com.hify.module.conversation.service.ChatContextAssembler;
+import com.hify.module.conversation.service.ChatContextCache;
 import com.hify.module.conversation.service.ChatMessageService;
 import com.hify.module.conversation.service.ChatService;
 import com.hify.module.conversation.service.ChatSessionService;
+import com.hify.shared.agent.AgentConfigApi;
+import com.hify.shared.agent.dto.AgentConfigDTO;
 import com.hify.shared.llm.LlmProviderApi;
 import com.hify.shared.llm.LlmStreamCallback;
 import com.hify.shared.llm.LlmStreamHandle;
@@ -75,6 +79,9 @@ public class ChatServiceImpl implements ChatService {
     private final ChatMessageService chatMessageService;
     private final LlmProviderApi llmProviderApi;
     private final ModelQueryApi modelQueryApi;
+    private final AgentConfigApi agentConfigApi;
+    private final ChatContextCache chatContextCache;
+    private final ChatContextAssembler chatContextAssembler;
     @Qualifier("llmExecutor")
     private final ThreadPoolTaskExecutor llmExecutor;
     @Qualifier("heartbeatScheduler")
@@ -123,31 +130,37 @@ public class ChatServiceImpl implements ChatService {
     public ChatMessageResponse sendBlocking(Long sessionId, String content) {
         // 同步校验：会话不存在时在调用 LLM 之前抛 BizException
         ChatSessionResponse session = resolveOrCreateSession(sessionId, content);
+        AgentConfigDTO agentConfig = resolveAgentConfig(session);
 
         // 1. 持久化用户消息（独立事务，事务不包裹 LLM 调用）
         chatMessageService.createUserMessage(session.getId(), content);
+        pushContext(session, agentConfig, "user", content);
 
-        // 2. 组装历史（与流式共用同一套）
-        List<LlmRequestDTO.Message> messages = buildHistoryMessages(session.getId());
+        // 2. 组装历史（Redis 优先，MySQL 回退；含裁剪 + system_prompt 注入）
+        List<LlmRequestDTO.Message> messages = buildHistoryMessages(session, agentConfig);
 
         // 3. 同步调用 LLM —— 阻塞模式客户端本就等结果，占用请求线程是语义要求
         LlmRequestDTO request = LlmRequestDTO.builder()
                 .modelId(session.getModelId())
                 .messages(messages)
                 .stream(false)
+                .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
+                .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
                 .build();
         LlmResponseDTO response = llmProviderApi.chat(request);
         log.info("LLM 阻塞对话完成: sessionId={}, modelId={}, latencyMs={}",
                 session.getId(), session.getModelId(), response.getLatencyMs());
 
         // 4. 持久化助手消息并返回（独立事务）
-        return chatMessageService.createAssistantMessage(
+        ChatMessageResponse assistant = chatMessageService.createAssistantMessage(
                 session.getId(),
                 response.getContent(),
                 response.getModel(),
                 toTokenUsageJson(response.getUsage()),
                 response.getFinishReason(),
                 response.getLatencyMs() != null ? response.getLatencyMs().intValue() : null);
+        pushContext(session, agentConfig, "assistant", response.getContent());
+        return assistant;
     }
 
     // ================================================================
@@ -156,18 +169,22 @@ public class ChatServiceImpl implements ChatService {
 
     private void doStream(ChatSessionResponse session, String content, StreamState state) {
         Long sessionId = session.getId();
+        AgentConfigDTO agentConfig = resolveAgentConfig(session);
 
         // 1. 持久化用户消息 —— createUserMessage 自带独立事务，无 LLM 调用（事务不包裹外部 IO）
         chatMessageService.createUserMessage(sessionId, content);
+        pushContext(session, agentConfig, "user", content);
 
-        // 2. 组装历史：listBySession 返回最新 N 条（seq DESC），反转成时间正序
-        List<LlmRequestDTO.Message> messages = buildHistoryMessages(sessionId);
+        // 2. 组装历史：Redis 最近上下文优先，MySQL 回退；含裁剪 + system_prompt 注入
+        List<LlmRequestDTO.Message> messages = buildHistoryMessages(session, agentConfig);
 
         // 3. modelId 为空时由 provider 层 resolveTarget 抛 BizException，落入外层 catch 转 error 事件
         LlmRequestDTO request = LlmRequestDTO.builder()
                 .modelId(session.getModelId())
                 .messages(messages)
                 .stream(true)
+                .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
+                .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
                 .build();
 
         // 4. 启动 SSE 心跳：LLM 推理期间若长时间无数据，Nginx/云 LB 可能掐断长连接
@@ -184,7 +201,7 @@ public class ChatServiceImpl implements ChatService {
                 @Override
                 public void onComplete(LlmResponseDTO response) {
                     cancelHeartbeat(state);
-                    persistAndFinish(sessionId, response, state);
+                    persistAndFinish(session, agentConfig, response, state);
                 }
 
                 @Override
@@ -210,7 +227,9 @@ public class ChatServiceImpl implements ChatService {
      * 元数据，前端可用 messageId 做点赞、删除等后续操作。流式 usage 当前为 null
      * （adapter 不累积），字段只在本帧铺好，等累积实现后自然透出。</p>
      */
-    private void persistAndFinish(Long sessionId, LlmResponseDTO response, StreamState state) {
+    private void persistAndFinish(ChatSessionResponse session, AgentConfigDTO agentConfig,
+                                  LlmResponseDTO response, StreamState state) {
+        Long sessionId = session.getId();
         ChatMessageResponse assistant = chatMessageService.createAssistantMessage(
                 sessionId,
                 response.getContent(),
@@ -218,6 +237,7 @@ public class ChatServiceImpl implements ChatService {
                 toTokenUsageJson(response.getUsage()),
                 response.getFinishReason(),
                 response.getLatencyMs() != null ? response.getLatencyMs().intValue() : null);
+        pushContext(session, agentConfig, "assistant", response.getContent());
 
         Map<String, Object> done = new HashMap<>();
         done.put("type", "done");
@@ -301,17 +321,55 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 组装发给 LLM 的历史消息：最新 N 条（seq DESC）反转成时间正序，映射为 shared DTO.
+     * 组装发给 LLM 的消息列表：Redis 最近上下文优先，为空则 MySQL 全量历史兜底并回填.
+     *
+     * <p>裁剪（轮数 + token 预算）与 system_prompt 注入统一交给
+     * {@link ChatContextAssembler}，本方法只负责"取数据源"。</p>
      */
-    private List<LlmRequestDTO.Message> buildHistoryMessages(Long sessionId) {
-        List<ChatMessageResponse> history = chatMessageService.listBySession(sessionId, HISTORY_LIMIT);
-        Collections.reverse(history);
-        return history.stream()
-                .map(m -> LlmRequestDTO.Message.builder()
-                        .role(m.getRole())
-                        .content(m.getContent())
-                        .build())
-                .collect(Collectors.toList());
+    private List<LlmRequestDTO.Message> buildHistoryMessages(ChatSessionResponse session,
+                                                             AgentConfigDTO agentConfig) {
+        Long sessionId = session.getId();
+        List<ChatContextCache.ContextMessage> recent = chatContextCache.readRecent(sessionId);
+        if (recent.isEmpty()) {
+            // Redis 为空/不可用：MySQL 兜底（最新 N 条反转成时间正序），并 best-effort 回填 Redis
+            List<ChatMessageResponse> history = chatMessageService.listBySession(sessionId, HISTORY_LIMIT);
+            Collections.reverse(history);
+            List<ChatContextCache.ContextMessage> fromDb = history.stream()
+                    .map(m -> new ChatContextCache.ContextMessage(m.getRole(), m.getContent()))
+                    .collect(Collectors.toList());
+            chatContextCache.backfill(sessionId, fromDb,
+                    chatContextAssembler.resolveMaxContextTurns(agentConfig));
+            recent = fromDb;
+        }
+        return chatContextAssembler.assemble(sessionId, agentConfig, recent);
+    }
+
+    /**
+     * 查询 Agent 运行时配置（system prompt / 模型 / 温度 / 上下文轮数）.
+     *
+     * <p>best-effort：Agent 查询失败或不存在时降级为无 system prompt 的自由聊天，
+     * 绝不让 LLM 调用因 Agent 配置异常而挂掉。</p>
+     */
+    private AgentConfigDTO resolveAgentConfig(ChatSessionResponse session) {
+        if (session.getAgentId() == null) {
+            return null;
+        }
+        try {
+            return agentConfigApi.getAgentConfig(session.getAgentId());
+        } catch (Exception e) {
+            log.warn("Agent 配置查询失败，降级为无 system prompt: agentId={}, err={}",
+                    session.getAgentId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 把一条消息写入 Redis 最近上下文缓存（轮数上限取 Agent 配置，best-effort）.
+     */
+    private void pushContext(ChatSessionResponse session, AgentConfigDTO agentConfig,
+                             String role, String content) {
+        int maxTurns = chatContextAssembler.resolveMaxContextTurns(agentConfig);
+        chatContextCache.pushMessage(session.getId(), role, content, maxTurns);
     }
 
     private String toTokenUsageJson(LlmResponseDTO.TokenUsage usage) {

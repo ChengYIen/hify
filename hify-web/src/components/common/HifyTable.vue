@@ -18,7 +18,7 @@ export interface PageParams {
 }
 
 /** 列配置 */
-export interface Column<T = Record<string, unknown>> {
+export interface Column {
   /** 列标题 */
   label: string
   /** 数据字段名（slot 列可省略，通过具名插槽渲染） */
@@ -37,7 +37,7 @@ export interface Column<T = Record<string, unknown>> {
 
 /** 表格组件属性 */
 const props = withDefaults(defineProps<{
-  columns: Column<T>[]
+  columns: Column[]
   api: (params: PageParams) => Promise<PageResult<T>>
   showPagination?: boolean
   pageSize?: number

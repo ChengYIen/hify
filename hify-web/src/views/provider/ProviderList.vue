@@ -75,12 +75,11 @@ async function fetchProviders(params: PageParams) {
 // Tag helpers
 // =========================================================================
 
+// 与后端 ProviderAdapterFactory 注册的 providerCode 一一对应
 const PROVIDER_CODE_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   claude: 'Claude',
-  gemini: 'Gemini',
   ollama: 'Ollama',
-  azure: 'Azure',
   openai_compatible: '兼容',
 }
 
@@ -89,9 +88,7 @@ function getProviderCodeTagType(code: unknown): 'success' | 'warning' | 'info' |
   const map: Record<string, 'success' | 'warning' | 'info' | 'danger' | 'primary'> = {
     openai: 'primary',
     claude: 'success',
-    gemini: 'warning',
     ollama: 'info',
-    azure: 'danger',
     openai_compatible: 'info',
   }
   return map[key] || 'info'
@@ -158,10 +155,11 @@ const dialogVisible = ref(false)
 const dialogRef = ref<{ open: (data?: Record<string, unknown>) => void; isEdit: boolean }>()
 const editingId = ref<number | null>(null)
 
+// 注意：apiKey 不设必填 —— Ollama 本地无需 key；编辑时后端不回传明文，
+// 留空表示不修改（handleSubmit 仅在非空时携带 authConfig）
 const formRules: FormRules = {
   name: [{ required: true, message: '请输入提供商名称', trigger: 'blur' }],
   providerCode: [{ required: true, message: '请选择提供商类型', trigger: 'change' }],
-  apiKey: [{ required: true, message: '请输入 API Key', trigger: 'blur' }],
 }
 
 function handleCreate(): void {
@@ -256,7 +254,7 @@ async function handleTestConnection(row: Record<string, unknown>): Promise<void>
 <template>
   <PageHeader
     title="模型提供商管理"
-    description="配置和管理 LLM 模型提供商（OpenAI / Claude / Gemini / Ollama）"
+    description="配置和管理 LLM 模型提供商（OpenAI / Anthropic / Ollama）"
   >
     <template #actions>
       <el-button type="primary" :icon="Plus" @click="handleCreate">新增提供商</el-button>
@@ -399,17 +397,15 @@ async function handleTestConnection(row: Record<string, unknown>): Promise<void>
       <el-form-item label="类型" prop="providerCode">
         <el-select v-model="formData.providerCode" placeholder="请选择提供商类型" style="width: 100%">
           <el-option label="OpenAI" value="openai" />
-          <el-option label="Claude" value="claude" />
-          <el-option label="Gemini" value="gemini" />
+          <el-option label="Anthropic（Claude）" value="claude" />
           <el-option label="Ollama" value="ollama" />
-          <el-option label="Azure" value="azure" />
           <el-option label="OpenAI 兼容" value="openai_compatible" />
         </el-select>
       </el-form-item>
       <el-form-item label="API Key" prop="apiKey">
         <el-input
           v-model="formData.apiKey"
-          placeholder="sk-..."
+          :placeholder="editingId ? '留空表示不修改' : 'sk-...（Ollama 可留空）'"
           type="password"
           show-password
         />
