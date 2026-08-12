@@ -35,8 +35,8 @@ public class ChatController {
     @PostMapping("/messages")
     public Object send(@Valid @RequestBody SendMessageRequest request) {
         if (Boolean.TRUE.equals(request.getStream())) {
-            return chatService.sendMessage(request.getSessionId(), request.getContent());
+            return chatService.sendMessage(request.getSessionId(), request.getContent(), request.getAgentId());
         }
-        return Result.ok(chatService.sendBlocking(request.getSessionId(), request.getContent()));
+        return Result.ok(chatService.sendBlocking(request.getSessionId(), request.getContent(), request.getAgentId()));
     }
 }

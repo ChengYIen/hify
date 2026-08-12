@@ -20,7 +20,6 @@ import com.hify.shared.llm.LlmStreamCallback;
 import com.hify.shared.llm.LlmStreamHandle;
 import com.hify.shared.llm.dto.LlmRequestDTO;
 import com.hify.shared.llm.dto.LlmResponseDTO;
-import com.hify.shared.provider.ModelQueryApi;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -78,7 +77,6 @@ public class ChatServiceImpl implements ChatService {
     private final ChatSessionService chatSessionService;
     private final ChatMessageService chatMessageService;
     private final LlmProviderApi llmProviderApi;
-    private final ModelQueryApi modelQueryApi;
     private final AgentConfigApi agentConfigApi;
     private final ChatContextCache chatContextCache;
     private final ChatContextAssembler chatContextAssembler;
@@ -89,10 +87,10 @@ public class ChatServiceImpl implements ChatService {
     private final ObjectMapper objectMapper;
 
     @Override
-    public SseEmitter sendMessage(Long sessionId, String content) {
+    public SseEmitter sendMessage(Long sessionId, String content, Long agentId) {
         // 同步校验（Tomcat 线程）：会话不存在时在返回 emitter 之前抛 BizException；
-        // sessionId 为 null 时自动创建新会话（取第一个可用模型）。
-        ChatSessionResponse session = resolveOrCreateSession(sessionId, content);
+        // sessionId 为 null 时自动创建新会话（agentId 非空则绑定 Agent，模型按 Agent 解析）。
+        ChatSessionResponse session = resolveOrCreateSession(sessionId, content, agentId);
         Long resolvedSessionId = session.getId();
 
         SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MS);
@@ -127,9 +125,9 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
-    public ChatMessageResponse sendBlocking(Long sessionId, String content) {
+    public ChatMessageResponse sendBlocking(Long sessionId, String content, Long agentId) {
         // 同步校验：会话不存在时在调用 LLM 之前抛 BizException
-        ChatSessionResponse session = resolveOrCreateSession(sessionId, content);
+        ChatSessionResponse session = resolveOrCreateSession(sessionId, content, agentId);
         AgentConfigDTO agentConfig = resolveAgentConfig(session);
 
         // 1. 持久化用户消息（独立事务，事务不包裹 LLM 调用）
@@ -291,16 +289,13 @@ public class ChatServiceImpl implements ChatService {
     /**
      * 解析目标会话；sessionId 为 null 时自动创建新会话.
      *
-     * <p>新会话：模型取第一个可用模型（模型启用且提供商启用），标题取首条消息摘要。
-     * 创建失败（无可用模型 / 未登录）抛 {@link BizException}。</p>
+     * <p>新会话：绑定 {@code agentId}（可为 null=自由对话），标题取首条消息摘要；
+     * 模型由 {@link ChatSessionServiceImpl#create} 解析——Agent 绑定模型 → 第一个可用模型，
+     * 均无可用模型时抛 {@link BizException(PROVIDER_NOT_FOUND)}。</p>
      */
-    private ChatSessionResponse resolveOrCreateSession(Long sessionId, String content) {
+    private ChatSessionResponse resolveOrCreateSession(Long sessionId, String content, Long agentId) {
         if (sessionId != null) {
             return chatSessionService.getById(sessionId); // 不存在时抛 BizException(CONVERSATION_NOT_FOUND)
-        }
-        Long defaultModelId = modelQueryApi.getFirstEnabledModelId();
-        if (defaultModelId == null) {
-            throw new BizException(ErrorCode.PROVIDER_NOT_FOUND, "暂无可用模型，请先在模型管理中配置并启用");
         }
         Long userId = UserContext.getUserId();
         if (userId == null) {
@@ -308,7 +303,7 @@ public class ChatServiceImpl implements ChatService {
         }
         ChatSessionCreateRequest request = new ChatSessionCreateRequest();
         request.setTitle(buildTitle(content));
-        request.setModelId(defaultModelId);
+        request.setAgentId(agentId);
         return chatSessionService.create(request, userId);
     }
 

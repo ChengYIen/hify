@@ -23,4 +23,10 @@ public class SendMessageRequest {
      * （标题取首条消息摘要，模型取第一个可用模型）。
      */
     private Long sessionId;
+
+    /**
+     * Agent ID，可选。仅 {@code sessionId} 为空、自动创建新会话时生效：
+     * 新会话绑定该 Agent，模型优先取 Agent 绑定模型。
+     */
+    private Long agentId;
 }

@@ -18,6 +18,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 /**
  * 对话会话业务实现.
  */
@@ -37,7 +44,9 @@ public class ChatSessionServiceImpl implements ChatSessionService {
                 new LambdaQueryWrapper<ChatSessionEntity>()
                         .eq(ChatSessionEntity::getUserId, userId)
                         .orderByDesc(ChatSessionEntity::getUpdatedAt));
-        return result.convert(this::toResponse);
+        IPage<ChatSessionResponse> respPage = result.convert(this::toResponse);
+        fillAgentNames(respPage.getRecords());
+        return respPage;
     }
 
     @Override
@@ -46,7 +55,9 @@ public class ChatSessionServiceImpl implements ChatSessionService {
         if (entity == null) {
             throw new BizException(ErrorCode.CONVERSATION_NOT_FOUND, "id=" + id);
         }
-        return toResponse(entity);
+        ChatSessionResponse response = toResponse(entity);
+        response.setAgentName(resolveAgentName(entity.getAgentId()));
+        return response;
     }
 
     @Override
@@ -65,7 +76,9 @@ public class ChatSessionServiceImpl implements ChatSessionService {
         entity.setTotalTokens(0);
         chatSessionMapper.insert(entity);
         log.info("ChatSession 创建成功: id={}, userId={}, modelId={}", entity.getId(), userId, modelId);
-        return toResponse(entity);
+        ChatSessionResponse response = toResponse(entity);
+        response.setAgentName(resolveAgentName(entity.getAgentId()));
+        return response;
     }
 
     /**
@@ -101,7 +114,9 @@ public class ChatSessionServiceImpl implements ChatSessionService {
         entity.setStatus("ARCHIVED");
         chatSessionMapper.updateById(entity);
         log.info("ChatSession 归档成功: id={}", id);
-        return toResponse(entity);
+        ChatSessionResponse response = toResponse(entity);
+        response.setAgentName(resolveAgentName(entity.getAgentId()));
+        return response;
     }
 
     @Override
@@ -113,6 +128,50 @@ public class ChatSessionServiceImpl implements ChatSessionService {
         }
         chatSessionMapper.deleteById(id);
         log.info("ChatSession 删除成功: id={}", id);
+    }
+
+    /**
+     * 批量填充会话列表的 Agent 名称.
+     *
+     * <p>按 distinct agentId 解析，避免逐条 N+1；单个 Agent 解析失败降级为 null，
+     * 不阻断整个列表返回（Agent 已删/禁用不影响历史会话展示）。</p>
+     */
+    private void fillAgentNames(List<ChatSessionResponse> sessions) {
+        Set<Long> agentIds = sessions.stream()
+                .map(ChatSessionResponse::getAgentId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (agentIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> nameMap = new HashMap<>();
+        for (Long agentId : agentIds) {
+            String name = resolveAgentName(agentId);
+            if (name != null) {
+                nameMap.put(agentId, name);
+            }
+        }
+        for (ChatSessionResponse session : sessions) {
+            if (session.getAgentId() != null) {
+                session.setAgentName(nameMap.get(session.getAgentId()));
+            }
+        }
+    }
+
+    /**
+     * 解析单个 Agent 名称；Agent 不存在/查询失败时返回 null.
+     */
+    private String resolveAgentName(Long agentId) {
+        if (agentId == null) {
+            return null;
+        }
+        try {
+            AgentConfigDTO config = agentConfigApi.getAgentConfig(agentId);
+            return config != null ? config.getName() : null;
+        } catch (Exception e) {
+            log.warn("解析 Agent 名称失败，降级为 null: agentId={}, err={}", agentId, e.getMessage());
+            return null;
+        }
     }
 
     private ChatSessionResponse toResponse(ChatSessionEntity entity) {

@@ -6,6 +6,8 @@ export interface SessionResponse {
   title: string
   userId: number
   agentId: number | null
+  /** Agent 名称（列表展示用；Agent 已删/禁用时为 null） */
+  agentName: string | null
   modelId: number
   status: string
   messageCount: number
@@ -63,9 +65,9 @@ export function latestMessages(sessionId: number, limit = 20) {
 }
 
 /** 同步阻塞发送（stream=false），返回完整助手消息 */
-export function sendMessageBlocking(sessionId: number | null, content: string) {
+export function sendMessageBlocking(sessionId: number | null, content: string, agentId?: number | null) {
   return post<MessageResponse>(
     sessionId != null ? `/v1/chat/sessions/${sessionId}/messages` : '/v1/chat/messages',
-    { content, stream: false },
+    { content, stream: false, ...(sessionId == null && agentId != null ? { agentId } : {}) },
   )
 }

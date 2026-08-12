@@ -25,9 +25,10 @@ public interface ChatService {
      *
      * @param sessionId 会话 ID，可为 null（null 时自动创建新会话）
      * @param content   用户消息内容
+     * @param agentId   自动创建新会话时绑定的 Agent ID，可为 null（自由对话）
      * @return SSE emitter
      */
-    SseEmitter sendMessage(Long sessionId, String content);
+    SseEmitter sendMessage(Long sessionId, String content, Long agentId);
 
     /**
      * 以阻塞方式发送一条用户消息，返回完整助手回复.
@@ -37,7 +38,8 @@ public interface ChatService {
      *
      * @param sessionId 会话 ID，可为 null（null 时自动创建新会话）
      * @param content   用户消息内容
+     * @param agentId   自动创建新会话时绑定的 Agent ID，可为 null（自由对话）
      * @return 已持久化的助手消息
      */
-    ChatMessageResponse sendBlocking(Long sessionId, String content);
+    ChatMessageResponse sendBlocking(Long sessionId, String content, Long agentId);
 }

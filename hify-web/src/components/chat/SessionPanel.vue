@@ -53,6 +53,7 @@ const emit = defineEmits<{
         @click="emit('select', s.id)"
       >
         <div class="session-item__title">{{ summarize(s.title || '未命名对话') }}</div>
+        <div v-if="s.agentName" class="session-item__agent">{{ s.agentName }}</div>
         <div class="session-item__meta">
           <span class="session-item__time">{{ formatRelativeTime(s.updatedAt) }}</span>
           <span v-if="s.messageCount" class="session-item__count">{{ s.messageCount }} 条</span>
@@ -123,6 +124,22 @@ const emit = defineEmits<{
 }
 .session-item.active .session-item__title {
   color: var(--hify-primary-600);
+}
+
+.session-item__agent {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--hify-primary-600);
+  background: var(--hify-primary-50);
+  border-radius: var(--hify-radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-item__meta {

@@ -16,6 +16,8 @@ public class ChatSessionResponse {
     private String title;
     private Long userId;
     private Long agentId;
+    /** Agent 名称（列表展示用，Agent 已删/禁用时为 null） */
+    private String agentName;
     private Long modelId;
     private String status;
     private Integer messageCount;

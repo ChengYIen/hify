@@ -60,8 +60,9 @@ public class ChatMessageController {
     public Object send(@PathVariable Long sessionId,
                        @Valid @RequestBody SendMessageRequest request) {
         if (Boolean.TRUE.equals(request.getStream())) {
-            return chatService.sendMessage(sessionId, request.getContent());
+            // 已有会话的 Agent 在创建时已绑定，agentId 仅对自动建会话场景生效，这里透传无副作用
+            return chatService.sendMessage(sessionId, request.getContent(), request.getAgentId());
         }
-        return Result.ok(chatService.sendBlocking(sessionId, request.getContent()));
+        return Result.ok(chatService.sendBlocking(sessionId, request.getContent(), request.getAgentId()));
     }
 }
