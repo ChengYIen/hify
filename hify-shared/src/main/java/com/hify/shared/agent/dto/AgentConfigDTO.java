@@ -25,4 +25,6 @@ public class AgentConfigDTO {
     private Integer maxTokens;
     private Integer maxIterations;
     private Boolean toolsEnabled;
+    /** 关联知识库 ID 列表（JSON 数组字符串，如 [1,2]） */
+    private String knowledgeIds;
 }

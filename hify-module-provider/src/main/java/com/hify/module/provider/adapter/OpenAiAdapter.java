@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hify.common.http.LlmHttpClient;
 import com.hify.module.provider.adapter.dto.ChatRequest;
 import com.hify.module.provider.adapter.dto.ChatResponse;
+import com.hify.module.provider.adapter.dto.EmbeddingRequest;
+import com.hify.module.provider.adapter.dto.EmbeddingResponse;
 import com.hify.module.provider.repository.entity.AuthConfig;
 
 import java.util.ArrayList;
@@ -209,6 +211,74 @@ public class OpenAiAdapter extends AbstractProviderAdapter {
             return contentNode.isNull() ? null : contentNode.asText();
         } catch (JsonProcessingException e) {
             return null;
+        }
+    }
+
+    // ================================================================
+    // 新增：Embedding 调用（POST /v1/embeddings）
+    // ================================================================
+
+    @Override
+    protected String getEmbeddingEndpoint() {
+        return "/v1/embeddings";
+    }
+
+    @Override
+    protected String buildEmbeddingRequestBody(EmbeddingRequest request) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", request.getModel());
+        body.put("input", request.getInputs());
+        // 仅 3 系列模型支持降维，省略则用模型默认维度
+        if (request.getDimensions() != null) {
+            body.put("dimensions", request.getDimensions());
+        }
+        try {
+            return objectMapper.writeValueAsString(body);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("序列化 OpenAI Embedding 请求体失败", e);
+        }
+    }
+
+    @Override
+    protected EmbeddingResponse parseEmbeddingResponse(String responseBody) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode data = root.get("data");
+
+            // data 数组按 index 排序，保证与入参 inputs 顺序一致
+            List<List<Float>> embeddings = new ArrayList<>();
+            if (data != null && data.isArray()) {
+                JsonNode[] ordered = new JsonNode[data.size()];
+                for (JsonNode item : data) {
+                    int idx = item.has("index") ? item.get("index").asInt() : ordered.length;
+                    if (idx >= 0 && idx < ordered.length) {
+                        ordered[idx] = item;
+                    }
+                }
+                for (JsonNode item : ordered) {
+                    List<Float> vec = new ArrayList<>();
+                    JsonNode vecNode = item != null ? item.get("embedding") : null;
+                    if (vecNode != null && vecNode.isArray()) {
+                        for (JsonNode v : vecNode) {
+                            vec.add((float) v.asDouble());
+                        }
+                    }
+                    embeddings.add(vec);
+                }
+            }
+
+            String model = root.has("model") ? root.get("model").asText() : null;
+            JsonNode usage = root.get("usage");
+            int promptTokens = usage != null && usage.has("prompt_tokens")
+                    ? usage.get("prompt_tokens").asInt() : 0;
+
+            return EmbeddingResponse.builder()
+                    .model(model)
+                    .embeddings(embeddings)
+                    .promptTokens(promptTokens)
+                    .build();
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("解析 OpenAI Embedding 响应失败", e);
         }
     }
 }

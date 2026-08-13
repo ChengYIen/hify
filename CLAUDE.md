@@ -341,7 +341,7 @@ public void handleMessage(MessageRequest request) {
 
 ```sql
 -- 知识库文档块表（PostgreSQL）
-CREATE TABLE knowledge_chunk (
+CREATE TABLE document_chunk (
     id BIGSERIAL PRIMARY KEY,
     knowledge_id BIGINT NOT NULL,          -- 对应 MySQL 中 knowledge 表的 ID
     chunk_index INTEGER NOT NULL,          -- 块序号
@@ -352,7 +352,7 @@ CREATE TABLE knowledge_chunk (
 
 -- 向量索引（HNSW 性能优于 IVFFlat，建表后创建）
 CREATE INDEX idx_knowledge_chunk_embedding
-    ON knowledge_chunk
+    ON document_chunk
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 200);
 ```

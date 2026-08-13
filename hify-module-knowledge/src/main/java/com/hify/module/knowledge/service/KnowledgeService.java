@@ -10,7 +10,7 @@ import com.hify.module.knowledge.controller.dto.KnowledgeUpdateRequest;
  */
 public interface KnowledgeService {
 
-    IPage<KnowledgeResponse> page(int page, int pageSize);
+    IPage<KnowledgeResponse> page(int page, int size, String name);
 
     KnowledgeResponse getById(Long id);
 

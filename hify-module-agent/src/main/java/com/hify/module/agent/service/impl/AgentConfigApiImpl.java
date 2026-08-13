@@ -34,6 +34,7 @@ public class AgentConfigApiImpl implements AgentConfigApi {
                 .maxTokens(response.getMaxTokens())
                 .maxIterations(response.getMaxContextTurns())
                 .toolsEnabled(response.getToolsEnabled() != null && response.getToolsEnabled() == 1)
+                .knowledgeIds(response.getKnowledgeIds())
                 .build();
     }
 }

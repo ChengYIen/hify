@@ -28,6 +28,9 @@ public class AgentCreateRequest {
     @NotNull(message = "模型配置 ID 不能为空")
     private Long modelConfigId;
 
+    /** 绑定的工作流 ID（可选） */
+    private Long workflowId;
+
     /** 温度 0.00–2.00 */
     private BigDecimal temperature;
 

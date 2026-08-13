@@ -70,6 +70,7 @@ public enum ErrorCode {
     KNOWLEDGE_NOT_FOUND(50001, "知识库不存在"),
     KNOWLEDGE_DOC_PARSE_FAILED(50002, "文档解析失败"),
     KNOWLEDGE_RETRIEVE_FAILED(50003, "知识检索失败"),
+    KNOWLEDGE_CONFIG_INVALID(50005, "知识库配置无效"),
 
     // ======================== Workflow 60001–60999 ========================
     WORKFLOW_NOT_FOUND(60001, "工作流不存在"),

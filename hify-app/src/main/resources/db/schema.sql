@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS hify_agent (
     avatar_url      VARCHAR(255) DEFAULT NULL COMMENT '头像 URL',
     system_prompt   TEXT         NOT NULL COMMENT '系统提示词',
     model_id        BIGINT UNSIGNED NOT NULL COMMENT '默认模型 ID（关联 hify_provider_model.id）',
+    workflow_id     BIGINT UNSIGNED DEFAULT NULL COMMENT '绑定的工作流 ID（关联 hify_workflow.id）',
     temperature     DECIMAL(3,2) DEFAULT 0.70 COMMENT '温度 0.00–2.00',
     max_tokens      INT          DEFAULT 4096 COMMENT '最大输出 Token',
     max_iterations  INT          NOT NULL DEFAULT 10 COMMENT 'Agent 循环最大迭代次数',
@@ -277,9 +278,10 @@ CREATE TABLE IF NOT EXISTS hify_knowledge (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name            VARCHAR(255) NOT NULL COMMENT '知识库名称',
     description     VARCHAR(512) DEFAULT NULL COMMENT '知识库描述',
+    enabled         TINYINT      NOT NULL DEFAULT 1 COMMENT '启用状态 0=禁用 1=启用',
     doc_count       INT          NOT NULL DEFAULT 0 COMMENT '文档数量（冗余）',
     chunk_count     INT          NOT NULL DEFAULT 0 COMMENT '向量块总数（冗余）',
-    embedding_model VARCHAR(128) NOT NULL DEFAULT 'text-embedding-ada-002' COMMENT '使用的 Embedding 模型',
+    embedding_model_id BIGINT UNSIGNED DEFAULT NULL COMMENT 'Embedding 模型配置 ID（关联 hify_provider_model.id，modelType=EMBEDDING）',
     created_by      BIGINT UNSIGNED DEFAULT NULL COMMENT '创建人用户 ID',
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -297,14 +299,14 @@ CREATE TABLE IF NOT EXISTS hify_knowledge_document (
     file_type       VARCHAR(16)  NOT NULL COMMENT '文件类型: PDF / TXT / MD / DOCX',
     file_size       BIGINT       NOT NULL DEFAULT 0 COMMENT '文件大小（字节）',
     file_url        VARCHAR(512) DEFAULT NULL COMMENT '文件存储 URL',
-    parse_status    VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT '解析状态: PENDING / PARSING / COMPLETED / FAILED',
+    status          VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT '处理状态: PENDING / PROCESSING / DONE / FAILED',
     chunk_count     INT          NOT NULL DEFAULT 0 COMMENT '切分块数',
     error_message   VARCHAR(512) DEFAULT NULL COMMENT '解析失败原因',
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted         TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=未删 1=已删',
     INDEX idx_doc_knowledge (knowledge_id),
-    INDEX idx_doc_parse_status (parse_status)
+    INDEX idx_doc_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='知识库文档表';
 
 -- ============================================================
@@ -314,7 +316,6 @@ CREATE TABLE IF NOT EXISTS hify_workflow (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name            VARCHAR(255) NOT NULL COMMENT '工作流名称',
     description     VARCHAR(512) DEFAULT NULL COMMENT '工作流描述',
-    definition      JSON         NOT NULL COMMENT '工作流定义（节点、边、输入输出）',
     status          VARCHAR(16)  NOT NULL DEFAULT 'DRAFT' COMMENT '状态: DRAFT / PUBLISHED / DISABLED',
     version         INT          NOT NULL DEFAULT 1 COMMENT '版本号',
     created_by      BIGINT UNSIGNED DEFAULT NULL COMMENT '创建人用户 ID',
@@ -324,6 +325,43 @@ CREATE TABLE IF NOT EXISTS hify_workflow (
     INDEX idx_workflow_status (status),
     INDEX idx_workflow_created_by (created_by)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工作流定义表';
+
+-- ============================================================
+-- 13.1 工作流节点定义表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS hify_workflow_node (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    workflow_id     BIGINT UNSIGNED NOT NULL COMMENT '所属工作流 ID',
+    node_key        VARCHAR(128) NOT NULL COMMENT '节点 key（工作流内唯一）',
+    node_name       VARCHAR(255) DEFAULT NULL COMMENT '节点显示名',
+    node_type       VARCHAR(32)  NOT NULL COMMENT '节点类型: START / END / LLM / CONDITION / API_CALL / KNOWLEDGE',
+    config          JSON         NOT NULL COMMENT '节点配置（按 node_type 解析为不同结构）',
+    position_x      DOUBLE       DEFAULT NULL COMMENT '画布 X 坐标',
+    position_y      DOUBLE       DEFAULT NULL COMMENT '画布 Y 坐标',
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted         TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=未删 1=已删',
+    INDEX idx_workflow_node_workflow (workflow_id),
+    INDEX idx_workflow_node_type (node_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工作流节点定义表';
+
+-- ============================================================
+-- 13.2 工作流边定义表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS hify_workflow_edge (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    workflow_id     BIGINT UNSIGNED NOT NULL COMMENT '所属工作流 ID',
+    edge_id         VARCHAR(128) DEFAULT NULL COMMENT '边 ID（画布编辑用）',
+    source_node_key VARCHAR(128) NOT NULL COMMENT '起始节点 key',
+    edge_condition  VARCHAR(64)  DEFAULT NULL COMMENT '路由条件标签，null 表示无条件边',
+    target_node_key VARCHAR(128) NOT NULL COMMENT '目标节点 key',
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted         TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=未删 1=已删',
+    INDEX idx_workflow_edge_workflow (workflow_id),
+    INDEX idx_workflow_edge_source (workflow_id, source_node_key),
+    INDEX idx_workflow_edge_target (workflow_id, target_node_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工作流边定义表';
 
 -- ============================================================
 -- 14. 工作流执行记录表
@@ -355,7 +393,7 @@ CREATE TABLE IF NOT EXISTS hify_workflow_node_execution (
     id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     execution_id      BIGINT UNSIGNED NOT NULL COMMENT '工作流执行 ID',
     node_id           VARCHAR(128) NOT NULL COMMENT '节点 ID（对应定义中的节点标识）',
-    node_type         VARCHAR(32)  NOT NULL COMMENT '节点类型: LLM / CONDITION / TOOL / START / END',
+    node_type         VARCHAR(32)  NOT NULL COMMENT '节点类型: LLM / CONDITION / API_CALL / KNOWLEDGE / START / END',
     input_data        JSON         DEFAULT NULL COMMENT '节点输入',
     output_data       JSON         DEFAULT NULL COMMENT '节点输出',
     status            VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT '状态: PENDING / RUNNING / COMPLETED / FAILED / SKIPPED',

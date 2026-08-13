@@ -34,6 +34,9 @@ public class AgentEntity extends BaseEntity {
     /** 默认模型 ID（关联 hify_provider_model.id） */
     private Long modelId;
 
+    /** 绑定的工作流 ID（关联 hify_workflow.id） */
+    private Long workflowId;
+
     /** 温度 0.00–2.00 */
     private BigDecimal temperature;
 

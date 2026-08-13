@@ -26,4 +26,14 @@ public interface ModelQueryApi {
      * @return 第一个可用的模型 ID；无任何可用模型返回 null
      */
     Long getFirstEnabledModelId();
+
+    /**
+     * 获取第一个启用的 Embedding 模型 ID.
+     *
+     * <p>供 knowledge 模块创建知识库时兜底——客户端未指定 Embedding 模型时，
+     * 自动选一个 {@code modelType = EMBEDDING} 且提供商启用的模型。</p>
+     *
+     * @return 第一个可用的 Embedding 模型 ID；没有则返回 null
+     */
+    Long getFirstEnabledEmbeddingModelId();
 }

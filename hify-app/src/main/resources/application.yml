@@ -70,6 +70,7 @@ management:
 
 # ======================== Hify 业务配置 ========================
 hify:
+  upload-dir: upload
   llm:
     timeout:
       connect: 10s

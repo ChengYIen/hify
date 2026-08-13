@@ -14,5 +14,9 @@ public class KnowledgeCreateRequest {
 
     private String description;
 
-    private String embeddingModel;
+    /**
+     * Embedding 模型配置 ID（关联 hify_provider_model.id，modelType=EMBEDDING）.
+     * 不传时自动选用第一个可用的 Embedding 模型。
+     */
+    private Long embeddingModelId;
 }

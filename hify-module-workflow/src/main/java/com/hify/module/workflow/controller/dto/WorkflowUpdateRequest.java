@@ -1,6 +1,10 @@
 package com.hify.module.workflow.controller.dto;
 
+import com.hify.module.workflow.model.WorkflowEdge;
+import com.hify.module.workflow.model.WorkflowNode;
 import lombok.Data;
+
+import java.util.List;
 
 /**
  * 更新工作流请求.
@@ -12,7 +16,9 @@ public class WorkflowUpdateRequest {
 
     private String description;
 
-    private String definition;
+    private List<WorkflowNode> nodes;
+
+    private List<WorkflowEdge> edges;
 
     private String status;
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Setting, User, ChatDotRound, Fold, Expand, HomeFilled } from '@element-plus/icons-vue'
+import { Setting, User, ChatDotRound, Collection, Fold, Expand, HomeFilled } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -27,9 +27,10 @@ onBeforeUnmount(() => {
 
 /* ---------- 菜单 ---------- */
 const menuItems = [
-  { path: '/provider',     title: '模型管理',  icon: Setting },
-  { path: '/agent',        title: 'Agent 管理', icon: User },
-  { path: '/conversation', title: '对话',       icon: ChatDotRound },
+  { path: '/provider',        title: '模型管理',   icon: Setting },
+  { path: '/agent',           title: 'Agent 管理', icon: User },
+  { path: '/knowledge-bases', title: '知识库',      icon: Collection },
+  { path: '/conversation',    title: '对话',        icon: ChatDotRound },
 ]
 
 function onMenuSelect(path: string) {
@@ -41,7 +42,7 @@ const breadcrumbs = computed(() => {
   const crumbs: { title: string; path?: string }[] = [
     { title: '首页', path: '/' },
   ]
-  const item = menuItems.find(m => m.path === route.path)
+  const item = menuItems.find(m => route.path === m.path || route.path.startsWith(`${m.path}/`))
   if (item) crumbs.push({ title: item.title })
   return crumbs
 })
@@ -73,7 +74,7 @@ function toggleCollapse() {
           v-for="item in menuItems"
           :key="item.path"
           class="menu-item"
-          :class="{ active: route.path === item.path }"
+          :class="{ active: route.path === item.path || route.path.startsWith(`${item.path}/`) }"
           @click="onMenuSelect(item.path)"
         >
           <span class="menu-indicator" />

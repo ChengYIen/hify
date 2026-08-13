@@ -25,7 +25,7 @@ public class WorkflowNodeExecutionEntity extends BaseEntity {
     /** 节点 ID（对应定义中的节点标识） */
     private String nodeId;
 
-    /** 节点类型：LLM / CONDITION / TOOL / START / END */
+    /** 节点类型：LLM / CONDITION / API_CALL / KNOWLEDGE / START / END */
     private String nodeType;
 
     /** 节点输入（JSON） */

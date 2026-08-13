@@ -15,9 +15,10 @@ public class KnowledgeResponse {
     private Long id;
     private String name;
     private String description;
+    private Integer enabled;
     private Integer docCount;
     private Integer chunkCount;
-    private String embeddingModel;
+    private Long embeddingModelId;
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

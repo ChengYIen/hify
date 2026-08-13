@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 知识库控制器.
  */
 @RestController
-@RequestMapping("/api/v1/knowledge")
+@RequestMapping("/api/v1/knowledge-bases")
 @RequiredArgsConstructor
 public class KnowledgeController {
 
@@ -34,10 +34,12 @@ public class KnowledgeController {
     @GetMapping
     public PageResult<KnowledgeResponse> list(
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer pageSize) {
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String name) {
         IPage<KnowledgeResponse> result = knowledgeService.page(
                 page != null ? page : 1,
-                pageSize != null ? pageSize : 20);
+                size != null ? size : 20,
+                name);
         return PageHelper.toPageResult(result);
     }
 

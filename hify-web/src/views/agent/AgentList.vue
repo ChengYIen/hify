@@ -22,6 +22,7 @@ import {
   type ToolDefinitionResponse,
   type AgentToolData,
 } from '@/api/agent'
+import { listKnowledgeBases, type KnowledgeBase } from '@/api/knowledge'
 import { getProviderList } from '@/api/provider'
 
 // =========================================================================
@@ -127,6 +128,7 @@ interface ProviderGroup {
 }
 
 const providerGroups = ref<ProviderGroup[]>([])
+const knowledgeBaseOptions = ref<KnowledgeBase[]>([])
 
 // ---- 工具绑定数据 ----
 
@@ -143,10 +145,11 @@ const TOOL_TYPE_LABELS: Record<string, string> = {
 async function loadFormReferenceData(): Promise<void> {
   formLoading.value = true
   try {
-    const [models, providers, tools] = await Promise.all([
+    const [models, providers, tools, knowledgeBases] = await Promise.all([
       listModelConfigs(),
       getProviderList({ page: 1, pageSize: 100 }),
       listToolDefinitions(),
+      listKnowledgeBases({ page: 1, size: 100 }),
     ])
 
     // 构建提供商名称映射
@@ -175,6 +178,7 @@ async function loadFormReferenceData(): Promise<void> {
     providerGroups.value = Array.from(groupMap.values())
 
     allToolDefinitions.value = tools
+    knowledgeBaseOptions.value = knowledgeBases.list.filter((kb) => kb.enabled === 1)
   } finally {
     formLoading.value = false
   }
@@ -192,6 +196,7 @@ function handleCreate(): void {
       maxTokens: 4096,
       maxContextTurns: 10,
       selectedToolIds: [],
+      selectedKnowledgeIds: [],
     })
   })
 }
@@ -210,6 +215,13 @@ async function handleEdit(row: Record<string, unknown>): Promise<void> {
     // 获取详情失败不影响编辑
   }
   existingToolNames.value = new Set(currentToolNames)
+  let selectedKnowledgeIds: number[] = []
+  try {
+    const parsed = a.knowledgeIds ? JSON.parse(a.knowledgeIds) : []
+    selectedKnowledgeIds = Array.isArray(parsed) ? parsed.map(Number) : []
+  } catch {
+    selectedKnowledgeIds = []
+  }
 
   // 匹配已绑定的工具到 tool definition ID
   const selectedIds: number[] = []
@@ -229,6 +241,7 @@ async function handleEdit(row: Record<string, unknown>): Promise<void> {
     maxTokens: a.maxTokens ?? 4096,
     maxContextTurns: a.maxContextTurns ?? 10,
     selectedToolIds: selectedIds,
+    selectedKnowledgeIds,
   })
 }
 
@@ -236,6 +249,7 @@ async function handleEdit(row: Record<string, unknown>): Promise<void> {
 
 async function handleSubmit(data: FormData): Promise<void> {
   const selectedToolIds = (data.selectedToolIds as number[]) || []
+  const selectedKnowledgeIds = (data.selectedKnowledgeIds as number[]) || []
 
   if (editingId.value) {
     // -- 编辑模式 --
@@ -250,6 +264,7 @@ async function handleSubmit(data: FormData): Promise<void> {
       // 取消全部工具时同步关闭工具调用（与创建路径一致，避免 toolsEnabled=1 但无工具绑定）
       toolsEnabled: selectedToolIds.length > 0 ? 1 : 0,
       status: (data.status as string) || undefined,
+      knowledgeIds: JSON.stringify(selectedKnowledgeIds),
     }
     await updateAgent(editingId.value, updateData)
 
@@ -279,6 +294,7 @@ async function handleSubmit(data: FormData): Promise<void> {
       toolsEnabled: selectedToolIds.length > 0 ? 1 : 0,
       status: (data.status as string) || undefined,
       toolIds: selectedToolIds.length > 0 ? selectedToolIds : undefined,
+      knowledgeIds: JSON.stringify(selectedKnowledgeIds),
     }
     await createAgent(createData)
     notifySuccess('创建成功')
@@ -415,6 +431,25 @@ ensureModelConfigsLoaded()
               :value="m.id"
             />
           </el-option-group>
+        </el-select>
+      </el-form-item>
+
+      <el-form-item label="关联知识库">
+        <el-select
+          v-model="formData.selectedKnowledgeIds"
+          multiple
+          clearable
+          collapse-tags
+          placeholder="选择该 Agent 可检索的知识库（可多选）"
+          style="width: 100%"
+          :loading="formLoading"
+        >
+          <el-option
+            v-for="kb in knowledgeBaseOptions"
+            :key="kb.id"
+            :label="kb.name"
+            :value="kb.id"
+          />
         </el-select>
       </el-form-item>
 

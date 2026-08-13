@@ -132,6 +132,7 @@ public class AgentServiceImpl implements AgentService {
         entity.setAvatarUrl(request.getAvatarUrl());
         entity.setSystemPrompt(request.getSystemPrompt());
         entity.setModelId(request.getModelConfigId());
+        entity.setWorkflowId(request.getWorkflowId());
         entity.setTemperature(request.getTemperature());
         entity.setMaxTokens(request.getMaxTokens() != null ? request.getMaxTokens() : 4096);
         entity.setMaxIterations(request.getMaxContextTurns() != null ? request.getMaxContextTurns() : 10);
@@ -191,6 +192,9 @@ public class AgentServiceImpl implements AgentService {
         }
         if (request.getModelId() != null) {
             entity.setModelId(request.getModelId());
+        }
+        if (request.getWorkflowId() != null) {
+            entity.setWorkflowId(request.getWorkflowId());
         }
         if (request.getTemperature() != null) {
             entity.setTemperature(request.getTemperature());
@@ -291,6 +295,7 @@ public class AgentServiceImpl implements AgentService {
                 .avatarUrl(entity.getAvatarUrl())
                 .systemPrompt(entity.getSystemPrompt())
                 .modelConfigId(entity.getModelId())
+                .workflowId(entity.getWorkflowId())
                 .temperature(entity.getTemperature())
                 .maxTokens(entity.getMaxTokens())
                 .maxContextTurns(entity.getMaxIterations())
@@ -311,6 +316,7 @@ public class AgentServiceImpl implements AgentService {
                 .avatarUrl(entity.getAvatarUrl())
                 .systemPrompt(entity.getSystemPrompt())
                 .modelConfigId(entity.getModelId())
+                .workflowId(entity.getWorkflowId())
                 .temperature(entity.getTemperature())
                 .maxTokens(entity.getMaxTokens())
                 .maxContextTurns(entity.getMaxIterations())
@@ -334,6 +340,7 @@ public class AgentServiceImpl implements AgentService {
                 .avatarUrl(entity.getAvatarUrl())
                 .systemPrompt(entity.getSystemPrompt())
                 .modelConfigId(entity.getModelId())
+                .workflowId(entity.getWorkflowId())
                 .temperature(entity.getTemperature())
                 .maxTokens(entity.getMaxTokens())
                 .maxContextTurns(entity.getMaxIterations())

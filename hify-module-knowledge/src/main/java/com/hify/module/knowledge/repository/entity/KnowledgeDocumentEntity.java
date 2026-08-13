@@ -32,8 +32,8 @@ public class KnowledgeDocumentEntity extends BaseEntity {
     /** 文件存储 URL */
     private String fileUrl;
 
-    /** 解析状态：PENDING / PARSING / COMPLETED / FAILED */
-    private String parseStatus;
+    /** 处理状态：PENDING / PROCESSING / DONE / FAILED */
+    private String status;
 
     /** 切分块数 */
     private Integer chunkCount;

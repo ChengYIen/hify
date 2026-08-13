@@ -6,7 +6,8 @@ spring:
       username: root
       password: 123456
     postgresql:
-      jdbc-url: jdbc:postgresql://localhost:5432/hify_dev
+      # 本机便携版 PG 运行在 5433（见 C:\Users\24454\pgdata，PG 17 + pgvector）
+      jdbc-url: jdbc:postgresql://localhost:5433/hify_dev
       username: hify
       password: hify
 

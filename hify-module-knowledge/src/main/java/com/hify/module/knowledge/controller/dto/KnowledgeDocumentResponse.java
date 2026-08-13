@@ -18,7 +18,7 @@ public class KnowledgeDocumentResponse {
     private String fileType;
     private Long fileSize;
     private String fileUrl;
-    private String parseStatus;
+    private String status;
     private Integer chunkCount;
     private String errorMessage;
     private LocalDateTime createdAt;

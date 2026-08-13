@@ -50,4 +50,21 @@ public class ModelQueryApiImpl implements ModelQueryApi {
         log.warn("未找到可用模型（模型启用且提供商启用）: 启用模型数={}", models.size());
         return null;
     }
+
+    @Override
+    public Long getFirstEnabledEmbeddingModelId() {
+        List<ModelConfig> models = providerModelMapper.selectList(
+                new LambdaQueryWrapper<ModelConfig>()
+                        .eq(ModelConfig::getStatus, "ENABLED")
+                        .eq(ModelConfig::getModelType, "EMBEDDING")
+                        .orderByAsc(ModelConfig::getId));
+        for (ModelConfig model : models) {
+            Provider provider = providerMapper.selectById(model.getProviderId());
+            if (provider != null && "ENABLED".equals(provider.getStatus())) {
+                return model.getId();
+            }
+        }
+        log.warn("未找到可用的 Embedding 模型（modelType=EMBEDDING 且提供商启用）: 候选数={}", models.size());
+        return null;
+    }
 }

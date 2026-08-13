@@ -9,6 +9,8 @@ import com.hify.module.provider.adapter.ProviderAdapterFactory;
 import com.hify.module.provider.adapter.StreamChatCallback;
 import com.hify.module.provider.adapter.dto.ChatRequest;
 import com.hify.module.provider.adapter.dto.ChatResponse;
+import com.hify.module.provider.adapter.dto.EmbeddingRequest;
+import com.hify.module.provider.adapter.dto.EmbeddingResponse;
 import com.hify.module.provider.repository.ProviderMapper;
 import com.hify.module.provider.repository.ProviderModelMapper;
 import com.hify.module.provider.repository.entity.ModelConfig;
@@ -16,6 +18,7 @@ import com.hify.module.provider.repository.entity.Provider;
 import com.hify.shared.llm.LlmProviderApi;
 import com.hify.shared.llm.LlmStreamCallback;
 import com.hify.shared.llm.LlmStreamHandle;
+import com.hify.shared.llm.dto.EmbeddingResponseDTO;
 import com.hify.shared.llm.dto.LlmRequestDTO;
 import com.hify.shared.llm.dto.LlmResponseDTO;
 import lombok.RequiredArgsConstructor;
@@ -104,6 +107,43 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
         return call != null ? call::cancel : () -> {};
     }
 
+    @Override
+    public EmbeddingResponseDTO embed(Long modelId, List<String> texts) {
+        if (texts == null || texts.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "texts 不能为空");
+        }
+        ResolvedTarget target = resolveTarget(modelId);
+        EmbeddingRequest request = EmbeddingRequest.builder()
+                .baseUrl(target.baseUrl())
+                .apiKey(target.apiKey())
+                .model(target.modelName())
+                .inputs(texts)
+                .dimensions(target.embeddingDimensions())
+                .build();
+
+        long start = System.currentTimeMillis();
+        EmbeddingResponse response = circuitBreakerService.executeWithResilience(
+                target.providerCode(),
+                () -> target.adapter().embed(request));
+        long latency = System.currentTimeMillis() - start;
+
+        LlmResponseDTO.TokenUsage usage = response.getPromptTokens() != null
+                ? LlmResponseDTO.TokenUsage.builder()
+                        .promptTokens(response.getPromptTokens())
+                        .totalTokens(response.getPromptTokens())
+                        .build()
+                : null;
+
+        log.info("LLM Embedding 完成: modelId={}, provider={}, count={}, latencyMs={}",
+                modelId, target.providerCode(), texts.size(), latency);
+        return EmbeddingResponseDTO.builder()
+                .model(response.getModel() != null ? response.getModel() : target.modelName())
+                .embeddings(response.getEmbeddings())
+                .usage(usage)
+                .latencyMs(latency)
+                .build();
+    }
+
     // ================================================================
     // 模型解析
     // ================================================================
@@ -140,8 +180,11 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
         }
 
         String apiKey = provider.getAuthConfig() != null ? provider.getAuthConfig().getApiKey() : null;
+        Integer embeddingDimensions = modelConfig.getExtraParams() != null
+                ? modelConfig.getExtraParams().getEmbeddingDimensions()
+                : null;
         return new ResolvedTarget(adapter, provider.getProviderCode(),
-                modelConfig.getModelName(), provider.getBaseUrl(), apiKey);
+                modelConfig.getModelName(), provider.getBaseUrl(), apiKey, embeddingDimensions);
     }
 
     // ================================================================
@@ -208,6 +251,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
 
     /** 一次调用解析出的目标对象 */
     private record ResolvedTarget(ProviderAdapter adapter, String providerCode,
-                                  String modelName, String baseUrl, String apiKey) {
+                                  String modelName, String baseUrl, String apiKey,
+                                  Integer embeddingDimensions) {
     }
 }

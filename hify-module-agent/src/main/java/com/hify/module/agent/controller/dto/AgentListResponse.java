@@ -19,6 +19,7 @@ public class AgentListResponse {
     private String avatarUrl;
     private String systemPrompt;
     private Long modelConfigId;
+    private Long workflowId;
     private BigDecimal temperature;
     private Integer maxTokens;
     private Integer maxContextTurns;

@@ -26,6 +26,16 @@ const routes: RouteRecordRaw[] = [
     name: 'Conversation',
     component: () => import('@/views/conversation/ConversationView.vue'),
   },
+  {
+    path: '/knowledge-bases',
+    name: 'KnowledgeBases',
+    component: () => import('@/views/knowledge/KnowledgeList.vue'),
+  },
+  {
+    path: '/knowledge-bases/:id/documents',
+    name: 'KnowledgeDocuments',
+    component: () => import('@/views/knowledge/KnowledgeDocuments.vue'),
+  },
 ]
 
 const router = createRouter({

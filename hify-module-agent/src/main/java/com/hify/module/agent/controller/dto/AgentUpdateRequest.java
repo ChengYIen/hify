@@ -22,6 +22,8 @@ public class AgentUpdateRequest {
 
     private Long modelId;
 
+    private Long workflowId;
+
     private BigDecimal temperature;
 
     private Integer maxTokens;

@@ -36,6 +36,14 @@ public class ModelExtraParams {
     private AudioCapability audio;
 
     /**
+     * Embedding 输出维度（仅 modelType=EMBEDDING 使用）.
+     * <p>多数 embedding 模型固定维度，但部分支持 Matryoshka 降维
+     * （如 Qwen3-Embedding 系列，dimensions 必须 ≤ 模型最大维度）。
+     * 设置后调用时透传 OpenAI 兼容的 {@code dimensions} 参数，保证输出维度与向量库表结构一致。</p>
+     */
+    private Integer embeddingDimensions;
+
+    /**
      * 扩展字段，存放上述标准字段以外的能力标记.
      */
     private Map<String, Object> extra = new LinkedHashMap<>();

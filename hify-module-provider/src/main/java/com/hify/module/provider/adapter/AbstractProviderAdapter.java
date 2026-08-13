@@ -6,6 +6,8 @@ import com.hify.common.http.LlmApiException;
 import com.hify.common.http.LlmHttpClient;
 import com.hify.module.provider.adapter.dto.ChatRequest;
 import com.hify.module.provider.adapter.dto.ChatResponse;
+import com.hify.module.provider.adapter.dto.EmbeddingRequest;
+import com.hify.module.provider.adapter.dto.EmbeddingResponse;
 import com.hify.module.provider.controller.dto.ConnectionTestResult;
 import com.hify.module.provider.repository.entity.AuthConfig;
 import com.hify.module.provider.repository.entity.Provider;
@@ -94,6 +96,30 @@ public abstract class AbstractProviderAdapter implements ProviderAdapter {
      * @return 增量文本，可能为 {@code null}（非内容行，如首条元数据帧）
      */
     protected abstract String extractStreamDelta(String line);
+
+    // ================================================================
+    // Embedding 模板钩子（默认不支持，支持厂商覆写）
+    // ================================================================
+
+    /**
+     * Embedding 端点路径，如 {@code /v1/embeddings}（OpenAI）。
+     * 返回 {@code null} 表示该厂商不支持 Embedding。
+     */
+    protected String getEmbeddingEndpoint() {
+        return null;
+    }
+
+    /** 将 {@link EmbeddingRequest} 转换为厂商特定的 JSON 请求体 */
+    protected String buildEmbeddingRequestBody(EmbeddingRequest request) {
+        throw new LlmApiException(LlmApiException.Type.NETWORK_ERROR, 0, "",
+                "该厂商不支持 Embedding 调用");
+    }
+
+    /** 将厂商 HTTP 响应体（JSON）解析为 {@link EmbeddingResponse} */
+    protected EmbeddingResponse parseEmbeddingResponse(String responseBody) {
+        throw new LlmApiException(LlmApiException.Type.NETWORK_ERROR, 0, "",
+                "该厂商不支持 Embedding 调用");
+    }
 
     // ================================================================
     // 原有模板方法：ProviderAdapter 实现
@@ -242,6 +268,35 @@ public abstract class AbstractProviderAdapter implements ProviderAdapter {
             case SERVER_ERROR  -> "服务器错误 (" + e.getStatusCode() + "): 提供商服务异常，请稍后重试";
             case RATE_LIMITED  -> "请求过于频繁 (429): 请稍后重试";
         };
+    }
+
+    // ================================================================
+    // 新增模板方法：Embedding 调用
+    // ================================================================
+
+    @Override
+    public EmbeddingResponse embed(EmbeddingRequest request) {
+        String url = resolveUrl(request.getBaseUrl());
+        if (url == null) {
+            throw new LlmApiException(LlmApiException.Type.NETWORK_ERROR, 0, "",
+                    "baseUrl 未配置且该厂商无默认地址");
+        }
+        String endpoint = getEmbeddingEndpoint();
+        if (endpoint == null) {
+            throw new LlmApiException(LlmApiException.Type.NETWORK_ERROR, 0, "",
+                    "该厂商不支持 Embedding 调用");
+        }
+        String fullUrl = url + endpoint;
+        Map<String, String> headers = buildChatHeaders(request.getApiKey());
+        String requestBody = buildEmbeddingRequestBody(request);
+
+        long start = System.currentTimeMillis();
+        String responseBody = llmHttpClient.post(fullUrl, headers, requestBody);
+
+        EmbeddingResponse response = parseEmbeddingResponse(responseBody);
+        response.setLatencyMs(System.currentTimeMillis() - start);
+        response.setModel(request.getModel());
+        return response;
     }
 
     // ================================================================

@@ -4,22 +4,25 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.hify.common.util.PageHelper;
 import com.hify.common.web.PageResult;
 import com.hify.common.web.Result;
+import com.hify.module.knowledge.controller.dto.DocumentContentRequest;
 import com.hify.module.knowledge.controller.dto.KnowledgeDocumentResponse;
 import com.hify.module.knowledge.service.KnowledgeDocumentService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 知识库文档控制器.
  */
 @RestController
-@RequestMapping("/api/v1/knowledge/{knowledgeId}/documents")
+@RequestMapping("/api/v1/knowledge-bases/{kbId}/documents")
 @RequiredArgsConstructor
 public class KnowledgeDocumentController {
 
@@ -27,34 +30,29 @@ public class KnowledgeDocumentController {
 
     @GetMapping
     public PageResult<KnowledgeDocumentResponse> list(
-            @PathVariable Long knowledgeId,
+            @PathVariable Long kbId,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer pageSize) {
+            @RequestParam(required = false) Integer size) {
         IPage<KnowledgeDocumentResponse> result = knowledgeDocumentService.pageByKnowledge(
-                knowledgeId,
+                kbId,
                 page != null ? page : 1,
-                pageSize != null ? pageSize : 20);
+                size != null ? size : 20);
         return PageHelper.toPageResult(result);
     }
 
-    @GetMapping("/{id}")
-    public Result<KnowledgeDocumentResponse> get(@PathVariable Long knowledgeId, @PathVariable Long id) {
-        return Result.ok(knowledgeDocumentService.getById(id));
-    }
-
     @PostMapping
-    public Result<KnowledgeDocumentResponse> upload(
-            @PathVariable Long knowledgeId,
-            @RequestParam String filename,
-            @RequestParam String fileType,
-            @RequestParam Long fileSize,
-            @RequestParam(required = false) String fileUrl) {
-        return Result.ok(knowledgeDocumentService.create(knowledgeId, filename, fileType, fileSize, fileUrl));
+    public Result<Long> upload(@PathVariable Long kbId,
+                               @RequestParam("file") MultipartFile file) {
+        return Result.ok(knowledgeDocumentService.upload(kbId, file));
     }
 
-    @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long knowledgeId, @PathVariable Long id) {
-        knowledgeDocumentService.delete(id);
+    /**
+     * 索引文档内容（解析器产出原始文本后调用），触发异步切片 + Embedding + 写 pgvector.
+     */
+    @PostMapping("/{id}/content")
+    public Result<Void> indexContent(@PathVariable Long id,
+                                     @Valid @RequestBody DocumentContentRequest request) {
+        knowledgeDocumentService.indexContent(id, request.getContent());
         return Result.ok();
     }
 }

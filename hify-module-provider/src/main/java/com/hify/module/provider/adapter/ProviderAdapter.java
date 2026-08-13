@@ -2,6 +2,8 @@ package com.hify.module.provider.adapter;
 
 import com.hify.module.provider.adapter.dto.ChatRequest;
 import com.hify.module.provider.adapter.dto.ChatResponse;
+import com.hify.module.provider.adapter.dto.EmbeddingRequest;
+import com.hify.module.provider.adapter.dto.EmbeddingResponse;
 import com.hify.module.provider.controller.dto.ConnectionTestResult;
 import com.hify.module.provider.repository.entity.Provider;
 import okhttp3.Call;
@@ -81,4 +83,24 @@ public interface ProviderAdapter {
      * @return 已 enqueue 的 {@link Call}，可随时取消；立即失败场景返回 null
      */
     Call streamChat(ChatRequest request, StreamChatCallback callback);
+
+    // ================================================================
+    // 向量化调用（默认不支持，实现类按需覆写）
+    // ================================================================
+
+    /**
+     * 同步向量化一批文本.
+     *
+     * <p>默认抛异常——Embedding 不是所有厂商都支持（Anthropic 无 embedding 端点）。
+     * 支持 Embedding 的适配器（如 OpenAI / Ollama）覆写本方法。</p>
+     *
+     * @param request 统一请求体（含传输层配置和文本列表）
+     * @return 统一响应体
+     * @throws com.hify.common.http.LlmApiException 当前提供商不支持或调用失败
+     */
+    default EmbeddingResponse embed(EmbeddingRequest request) {
+        throw new com.hify.common.http.LlmApiException(
+                com.hify.common.http.LlmApiException.Type.NETWORK_ERROR, 0, "",
+                "当前提供商不支持 Embedding 调用");
+    }
 }

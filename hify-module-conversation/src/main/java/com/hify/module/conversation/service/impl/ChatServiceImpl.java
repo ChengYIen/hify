@@ -1,9 +1,11 @@
 package com.hify.module.conversation.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hify.common.exception.BizException;
 import com.hify.common.exception.ErrorCode;
+import com.hify.common.util.TokenEstimator;
 import com.hify.common.web.UserContext;
 import com.hify.module.conversation.controller.dto.ChatMessageResponse;
 import com.hify.module.conversation.controller.dto.ChatSessionCreateRequest;
@@ -20,6 +22,8 @@ import com.hify.shared.llm.LlmStreamCallback;
 import com.hify.shared.llm.LlmStreamHandle;
 import com.hify.shared.llm.dto.LlmRequestDTO;
 import com.hify.shared.llm.dto.LlmResponseDTO;
+import com.hify.shared.rag.RagRetrievalApi;
+import com.hify.shared.rag.dto.RagChunkDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -28,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -68,6 +73,9 @@ public class ChatServiceImpl implements ChatService {
     private static final int HISTORY_LIMIT = 20;
     private static final int HEARTBEAT_INTERVAL_SECONDS = 10;
     private static final int TITLE_MAX_LENGTH = 30;
+    private static final int RAG_TOP_K = 5;
+    private static final double RAG_MIN_SCORE = 0.4;
+    private static final int RAG_CONTEXT_TOKEN_BUDGET = 1200;
     /**
      * 必须大于最长 LLM 读取超时（Ollama 180s），否则长流会被 emitter 自身超时掐断；
      * 心跳保证连接持续有数据，超时只是兜底，实际很少触发。
@@ -78,6 +86,7 @@ public class ChatServiceImpl implements ChatService {
     private final ChatMessageService chatMessageService;
     private final LlmProviderApi llmProviderApi;
     private final AgentConfigApi agentConfigApi;
+    private final RagRetrievalApi ragRetrievalApi;
     private final ChatContextCache chatContextCache;
     private final ChatContextAssembler chatContextAssembler;
     @Qualifier("llmExecutor")
@@ -319,7 +328,9 @@ public class ChatServiceImpl implements ChatService {
      * 组装发给 LLM 的消息列表：Redis 最近上下文优先，为空则 MySQL 全量历史兜底并回填.
      *
      * <p>裁剪（轮数 + token 预算）与 system_prompt 注入统一交给
-     * {@link ChatContextAssembler}，本方法只负责"取数据源"。</p>
+     * {@link ChatContextAssembler}；本方法在组装后按 Agent 绑定的知识库做 RAG 检索，
+     * topK=5 且相似度 >= 0.4，把命中块按固定格式拼到 system prompt 之后。
+     * 检索失败按 best-effort 降级为无知识上下文。</p>
      */
     private List<LlmRequestDTO.Message> buildHistoryMessages(ChatSessionResponse session,
                                                              AgentConfigDTO agentConfig) {
@@ -336,7 +347,91 @@ public class ChatServiceImpl implements ChatService {
                     chatContextAssembler.resolveMaxContextTurns(agentConfig));
             recent = fromDb;
         }
-        return chatContextAssembler.assemble(sessionId, agentConfig, recent);
+
+        List<LlmRequestDTO.Message> messages = chatContextAssembler.assemble(sessionId, agentConfig, recent);
+        if (agentConfig == null || agentConfig.getKnowledgeIds() == null
+                || agentConfig.getKnowledgeIds().isBlank()) {
+            return messages;
+        }
+
+        // 当前用户消息已由调用方 push 进 recent，取最后一条 user 消息作为检索 query
+        String query = null;
+        for (int i = recent.size() - 1; i >= 0; i--) {
+            if ("user".equals(recent.get(i).role())) {
+                query = recent.get(i).content();
+                break;
+            }
+        }
+        if (query == null || query.isBlank()) {
+            return messages;
+        }
+
+        List<Long> knowledgeIds;
+        try {
+            knowledgeIds = objectMapper.readValue(agentConfig.getKnowledgeIds(),
+                    new TypeReference<List<Long>>() {});
+        } catch (Exception e) {
+            log.warn("知识库 ID 解析失败，跳过 RAG: knowledgeIds={}, err={}",
+                    agentConfig.getKnowledgeIds(), e.getMessage());
+            return messages;
+        }
+        if (knowledgeIds.isEmpty()) {
+            return messages;
+        }
+
+        List<RagChunkDTO> chunks = new ArrayList<>();
+        for (Long knowledgeId : knowledgeIds) {
+            try {
+                chunks.addAll(ragRetrievalApi.search(knowledgeId, query, RAG_TOP_K));
+            } catch (Exception e) {
+                log.warn("知识库检索失败，降级为无知识上下文: knowledgeId={}, err={}",
+                        knowledgeId, e.getMessage());
+            }
+        }
+        List<RagChunkDTO> matched = chunks.stream()
+                .filter(chunk -> chunk.getScore() != null && chunk.getScore() >= RAG_MIN_SCORE)
+                .limit(RAG_TOP_K)
+                .collect(Collectors.toList());
+        log.info("RAG 检索命中: knowledgeIds={}, hits={}, scores={}",
+                knowledgeIds, matched.size(),
+                matched.stream().map(RagChunkDTO::getScore).collect(Collectors.toList()));
+        if (matched.isEmpty()) {
+            String noReferenceHint = "\n\n未检索到任何参考资料。请直接回答：\"我没有找到相关资料\"。"
+                    + "不要根据你自己的知识补充细节或编造答案。";
+            for (LlmRequestDTO.Message message : messages) {
+                if ("system".equals(message.getRole())) {
+                    message.setContent(message.getContent() + noReferenceHint);
+                    return messages;
+                }
+            }
+            messages.add(0, LlmRequestDTO.Message.builder()
+                    .role("system")
+                    .content(noReferenceHint)
+                    .build());
+            return messages;
+        }
+
+        StringBuilder ragContext = new StringBuilder("\n\n请基于以下参考资料回答用户问题。\n")
+                .append("如果资料中没有相关信息，直接说\"我没有找到相关资料\"，不要编造。\n\n")
+                .append("【参考资料】\n");
+        int ragIndex = 1;
+        for (RagChunkDTO chunk : matched) {
+            ragContext.append('[').append(ragIndex++).append("] ").append(chunk.getContent()).append('\n');
+        }
+        String ragText = ragContext.toString();
+
+        // 合并进首条 system 消息，保持单条 system 的 provider 兼容性
+        for (LlmRequestDTO.Message message : messages) {
+            if ("system".equals(message.getRole())) {
+                message.setContent(message.getContent() + ragText);
+                return messages;
+            }
+        }
+        messages.add(0, LlmRequestDTO.Message.builder()
+                .role("system")
+                .content(ragText)
+                .build());
+        return messages;
     }
 
     /**

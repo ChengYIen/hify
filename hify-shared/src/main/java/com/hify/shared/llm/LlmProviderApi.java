@@ -1,7 +1,10 @@
 package com.hify.shared.llm;
 
+import com.hify.shared.llm.dto.EmbeddingResponseDTO;
 import com.hify.shared.llm.dto.LlmRequestDTO;
 import com.hify.shared.llm.dto.LlmResponseDTO;
+
+import java.util.List;
 
 /**
  * LLM 提供商统一调用接口.
@@ -39,4 +42,17 @@ public interface LlmProviderApi {
      * @return 流式调用句柄（用于取消）；baseUrl 缺失等立即失败场景返回 null
      */
     LlmStreamHandle streamChat(LlmRequestDTO request, LlmStreamCallback callback);
+
+    /**
+     * 批量文本向量化（Embedding）.
+     *
+     * <p>与 {@link #chat} 一样按 {@code modelId} 路由，调用方只需传入文本列表。
+     * 底层必须是支持 Embedding 能力的模型（{@code modelType = EMBEDDING}），
+     * 否则由 provider 模块抛出异常。返回向量与 {@code texts} 顺序一一对应。</p>
+     *
+     * @param modelId 模型配置 ID（必须为 Embedding 模型）
+     * @param texts   待向量化的文本列表，不能为空
+     * @return 统一响应体（含向量列表、用量、耗时）
+     */
+    EmbeddingResponseDTO embed(Long modelId, List<String> texts);
 }
