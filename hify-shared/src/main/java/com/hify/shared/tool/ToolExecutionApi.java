@@ -16,9 +16,10 @@ public interface ToolExecutionApi {
     /**
      * 执行工具调用.
      *
+     * @param mcpServerId MCP Server ID
      * @param toolName 工具名称
      * @param params   工具参数
      * @return 工具执行结果
      */
-    ToolResultDTO execute(String toolName, Map<String, Object> params);
+    ToolResultDTO execute(Long mcpServerId, String toolName, Map<String, Object> params);
 }

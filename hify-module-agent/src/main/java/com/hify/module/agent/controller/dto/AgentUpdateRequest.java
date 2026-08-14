@@ -22,6 +22,9 @@ public class AgentUpdateRequest {
 
     private Long modelId;
 
+    /** 解绑工作流：true 时清空 workflowId；与 workflowId 同时传时以解绑优先 */
+    private Boolean unbindWorkflow;
+
     private Long workflowId;
 
     private BigDecimal temperature;

@@ -6,23 +6,21 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hify.common.config.CacheNames;
 import com.hify.common.exception.BizException;
 import com.hify.common.exception.ErrorCode;
+import com.hify.common.util.RedisUtil;
 import com.hify.module.agent.controller.dto.AgentCreateRequest;
 import com.hify.module.agent.controller.dto.AgentDetailResponse;
 import com.hify.module.agent.controller.dto.AgentListResponse;
 import com.hify.module.agent.controller.dto.AgentResponse;
-import com.hify.module.agent.controller.dto.AgentToolRequest;
 import com.hify.module.agent.controller.dto.AgentToolResponse;
 import com.hify.module.agent.controller.dto.AgentUpdateRequest;
-import com.hify.common.util.RedisUtil;
 import com.hify.module.agent.repository.AgentMapper;
 import com.hify.module.agent.repository.AgentToolMapper;
-import com.hify.module.agent.repository.ToolDefinitionMapper;
 import com.hify.module.agent.repository.entity.AgentEntity;
 import com.hify.module.agent.repository.entity.AgentToolEntity;
-import com.hify.module.agent.repository.entity.ToolDefinitionEntity;
 import com.hify.module.agent.service.AgentService;
 import com.hify.shared.conversation.SessionQueryApi;
 import com.hify.shared.provider.ModelQueryApi;
+import com.hify.shared.tool.McpToolQueryApi;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -45,11 +45,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AgentServiceImpl implements AgentService {
 
+    private static final int MAX_AGENT_TOOLS = 10;
+
     private final AgentMapper agentMapper;
     private final AgentToolMapper agentToolMapper;
-    private final ToolDefinitionMapper toolDefinitionMapper;
     private final SessionQueryApi sessionQueryApi;
     private final ModelQueryApi modelQueryApi;
+    private final McpToolQueryApi mcpToolQueryApi;
 
     /** Redis 工具（可选注入，Redis 不可用时自动降级为直接查库） */
     @Autowired(required = false)
@@ -86,7 +88,6 @@ public class AgentServiceImpl implements AgentService {
 
     @Override
     public AgentResponse getByIdWithTools(Long id) {
-        // 缓存命中直接返回
         AgentResponse cached = getCached(id);
         if (cached != null) {
             return cached;
@@ -95,23 +96,17 @@ public class AgentServiceImpl implements AgentService {
         List<AgentToolEntity> tools = agentToolMapper.selectList(
                 new LambdaQueryWrapper<AgentToolEntity>()
                         .eq(AgentToolEntity::getAgentId, id)
-                        .orderByAsc(AgentToolEntity::getPriority));
+                        .orderByAsc(AgentToolEntity::getId));
         response.setTools(tools.stream().map(this::toToolResponse).collect(Collectors.toList()));
         response.setToolCount(tools.size());
-        // 写入缓存
         putCache(id, response);
         return response;
     }
-
-    // =====================================================================
-    // 创建 Agent（四步流程）
-    // =====================================================================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = CacheNames.AGENT, key = "'list'")
     public AgentDetailResponse create(AgentCreateRequest request) {
-        // ---- 第一步：检查 name 唯一性 ----
         Long nameCount = agentMapper.selectCount(
                 new LambdaQueryWrapper<AgentEntity>()
                         .eq(AgentEntity::getName, request.getName()));
@@ -119,13 +114,11 @@ public class AgentServiceImpl implements AgentService {
             throw new BizException(ErrorCode.DUPLICATE, "Agent 名称已存在: " + request.getName());
         }
 
-        // ---- 第二步：跨模块校验 modelConfigId（调 shared 接口，不直接查 mapper） ----
         if (!modelQueryApi.isModelAvailable(request.getModelConfigId())) {
             throw new BizException(ErrorCode.PARAM_INVALID,
                     "模型不可用或不存在: modelConfigId=" + request.getModelConfigId());
         }
 
-        // ---- 第三步：事务中 INSERT agent + 批量 INSERT agent_tool ----
         AgentEntity entity = new AgentEntity();
         entity.setName(request.getName());
         entity.setDescription(request.getDescription());
@@ -141,15 +134,10 @@ public class AgentServiceImpl implements AgentService {
         entity.setStatus(request.getStatus() != null ? request.getStatus() : "DRAFT");
         agentMapper.insert(entity);
 
-        // 处理 toolIds：查 ToolDefinition → 创建 agent_tool 绑定记录
-        List<AgentToolEntity> savedTools = Collections.emptyList();
-        if (request.getToolIds() != null && !request.getToolIds().isEmpty()) {
-            savedTools = bindToolsByDefinitionIds(entity.getId(), request.getToolIds());
-        }
+        List<Long> toolIds = validateToolIds(request.getToolIds());
+        List<AgentToolEntity> savedTools = bindToolIds(entity.getId(), toolIds);
 
-        // ---- 第四步：@CacheEvict 清除 agent 列表缓存（注解已声明） + 清除详情缓存 ----
         evictCache(entity.getId());
-
         log.info("Agent 创建成功: id={}, name={}, toolCount={}",
                 entity.getId(), entity.getName(), savedTools.size());
         return toDetailResponse(entity, savedTools);
@@ -163,7 +151,6 @@ public class AgentServiceImpl implements AgentService {
         if (entity == null) {
             throw new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + id);
         }
-        // 改名时校验唯一性
         if (request.getName() != null && !request.getName().equals(entity.getName())) {
             Long nameCount = agentMapper.selectCount(
                     new LambdaQueryWrapper<AgentEntity>()
@@ -172,7 +159,6 @@ public class AgentServiceImpl implements AgentService {
                 throw new BizException(ErrorCode.DUPLICATE, "Agent 名称已存在: " + request.getName());
             }
         }
-        // 改模型时校验可用性
         if (request.getModelId() != null && !request.getModelId().equals(entity.getModelId())) {
             if (!modelQueryApi.isModelAvailable(request.getModelId())) {
                 throw new BizException(ErrorCode.PARAM_INVALID, "模型不可用或不存在: modelId=" + request.getModelId());
@@ -193,7 +179,9 @@ public class AgentServiceImpl implements AgentService {
         if (request.getModelId() != null) {
             entity.setModelId(request.getModelId());
         }
-        if (request.getWorkflowId() != null) {
+        if (Boolean.TRUE.equals(request.getUnbindWorkflow())) {
+            entity.setWorkflowId(null);
+        } else if (request.getWorkflowId() != null) {
             entity.setWorkflowId(request.getWorkflowId());
         }
         if (request.getTemperature() != null) {
@@ -216,7 +204,6 @@ public class AgentServiceImpl implements AgentService {
         }
         agentMapper.updateById(entity);
 
-        // 查询现有工具用于返回
         List<AgentToolEntity> tools = agentToolMapper.selectList(
                 new LambdaQueryWrapper<AgentToolEntity>()
                         .eq(AgentToolEntity::getAgentId, id));
@@ -228,12 +215,14 @@ public class AgentServiceImpl implements AgentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = CacheNames.AGENT, key = "'list'")
-    public List<AgentToolRequest> updateTools(Long id, List<AgentToolRequest> tools) {
+    public List<AgentToolResponse> updateTools(Long id, List<Long> toolIds) {
         AgentEntity entity = agentMapper.selectById(id);
         if (entity == null) {
             throw new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + id);
         }
-        // 逻辑删除旧工具（先查 ID → deleteByIds，确保走 @TableLogic）
+
+        List<Long> validToolIds = validateToolIds(toolIds);
+
         List<AgentToolEntity> oldTools = agentToolMapper.selectList(
                 new LambdaQueryWrapper<AgentToolEntity>()
                         .eq(AgentToolEntity::getAgentId, id));
@@ -243,14 +232,13 @@ public class AgentServiceImpl implements AgentService {
                     .collect(Collectors.toList());
             agentToolMapper.deleteByIds(oldIds);
         }
-        // 插入新工具
-        if (tools != null && !tools.isEmpty()) {
-            batchInsertTools(id, tools);
-        }
-        log.info("Agent 工具更新成功: agentId={}, toolCount={}",
-                id, tools != null ? tools.size() : 0);
+
+        List<AgentToolEntity> savedTools = bindToolIds(id, validToolIds);
+        log.info("Agent 工具更新成功: agentId={}, toolCount={}", id, savedTools.size());
         evictCache(id);
-        return tools != null ? tools : Collections.emptyList();
+        return savedTools.stream()
+                .map(this::toToolResponse)
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -261,13 +249,13 @@ public class AgentServiceImpl implements AgentService {
         if (entity == null) {
             throw new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + id);
         }
-        // 检查是否有活跃会话引用，有则不允许删除
+
         long activeCount = sessionQueryApi.countActiveByAgentId(id);
         if (activeCount > 0) {
             throw new BizException(ErrorCode.DATA_CONFLICT,
                     "该 Agent 下有 " + activeCount + " 个活跃对话，请先结束对话后再删除");
         }
-        // 逻辑删除关联的工具（通过 @TableLogic，转为 UPDATE deleted=1）
+
         List<AgentToolEntity> tools = agentToolMapper.selectList(
                 new LambdaQueryWrapper<AgentToolEntity>()
                         .eq(AgentToolEntity::getAgentId, id));
@@ -277,15 +265,45 @@ public class AgentServiceImpl implements AgentService {
                     .collect(Collectors.toList());
             agentToolMapper.deleteByIds(toolIds);
         }
-        // 逻辑删除 Agent（通过 @TableLogic）
         agentMapper.deleteById(id);
         evictCache(id);
         log.info("Agent 删除成功: id={}, 级联删除工具数={}", id, tools.size());
     }
 
-    // =====================================================================
-    // 私有转换方法
-    // =====================================================================
+    private List<Long> validateToolIds(List<Long> toolIds) {
+        if (toolIds == null || toolIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> distinctToolIds = toolIds.stream()
+                .distinct()
+                .collect(Collectors.toList());
+        if (distinctToolIds.size() > MAX_AGENT_TOOLS) {
+            throw new BizException(ErrorCode.PARAM_INVALID,
+                    "一个 Agent 最多绑定 " + MAX_AGENT_TOOLS + " 个工具");
+        }
+
+        List<Long> availableToolIds = mcpToolQueryApi.listAvailableToolIds(distinctToolIds);
+        Set<Long> availableSet = new HashSet<>(availableToolIds);
+        for (Long toolId : distinctToolIds) {
+            if (!availableSet.contains(toolId)) {
+                throw new BizException(ErrorCode.PARAM_INVALID,
+                        "工具不存在或其 MCP Server 未启用: toolId=" + toolId);
+            }
+        }
+        return distinctToolIds;
+    }
+
+    private List<AgentToolEntity> bindToolIds(Long agentId, List<Long> toolIds) {
+        List<AgentToolEntity> result = new ArrayList<>(toolIds.size());
+        for (Long toolId : toolIds) {
+            AgentToolEntity toolEntity = new AgentToolEntity();
+            toolEntity.setAgentId(agentId);
+            toolEntity.setToolId(toolId);
+            agentToolMapper.insert(toolEntity);
+            result.add(toolEntity);
+        }
+        return result;
+    }
 
     private AgentListResponse toListResponse(AgentEntity entity) {
         return AgentListResponse.builder()
@@ -329,9 +347,6 @@ public class AgentServiceImpl implements AgentService {
                 .build();
     }
 
-    /**
-     * Entity → AgentDetailResponse（含工具列表）.
-     */
     private AgentDetailResponse toDetailResponse(AgentEntity entity, List<AgentToolEntity> tools) {
         return AgentDetailResponse.builder()
                 .id(entity.getId())
@@ -357,9 +372,6 @@ public class AgentServiceImpl implements AgentService {
                 .build();
     }
 
-    /**
-     * Entity 转 DTO 并附带工具列表.
-     */
     private AgentResponse toResponseWithTools(AgentEntity entity, List<AgentToolEntity> tools) {
         AgentResponse response = toResponse(entity);
         response.setToolCount(tools.size());
@@ -369,77 +381,15 @@ public class AgentServiceImpl implements AgentService {
         return response;
     }
 
-    /**
-     * 根据工具定义 ID 列表创建 agent_tool 绑定记录.
-     * <p>
-     * 逐一查询 {@link ToolDefinitionEntity}，校验存在且启用，
-     * 将其信息复制到 {@link AgentToolEntity} 中。
-     * </p>
-     *
-     * @param agentId Agent ID
-     * @param toolDefIds 工具定义 ID 列表
-     * @return 创建成功的工具关联实体列表
-     */
-    private List<AgentToolEntity> bindToolsByDefinitionIds(Long agentId, List<Long> toolDefIds) {
-        List<AgentToolEntity> result = new ArrayList<>(toolDefIds.size());
-        for (int i = 0; i < toolDefIds.size(); i++) {
-            Long toolDefId = toolDefIds.get(i);
-            ToolDefinitionEntity def = toolDefinitionMapper.selectById(toolDefId);
-            if (def == null) {
-                throw new BizException(ErrorCode.PARAM_INVALID,
-                        "工具定义不存在: toolDefId=" + toolDefId);
-            }
-            if (!"ENABLED".equals(def.getStatus())) {
-                throw new BizException(ErrorCode.PARAM_INVALID,
-                        "工具定义未启用: toolName=" + def.getToolName());
-            }
-            AgentToolEntity toolEntity = new AgentToolEntity();
-            toolEntity.setAgentId(agentId);
-            toolEntity.setToolName(def.getToolName());
-            toolEntity.setToolType(def.getToolType());
-            toolEntity.setToolConfig(def.getToolConfig());
-            toolEntity.setPriority(i);
-            agentToolMapper.insert(toolEntity);
-            result.add(toolEntity);
-        }
-        return result;
-    }
-
-    /**
-     * 批量插入工具关联并返回持久化后的实体列表.
-     */
-    private List<AgentToolEntity> batchInsertTools(Long agentId, List<AgentToolRequest> tools) {
-        List<AgentToolEntity> result = new ArrayList<>(tools.size());
-        for (int i = 0; i < tools.size(); i++) {
-            AgentToolRequest tool = tools.get(i);
-            AgentToolEntity toolEntity = new AgentToolEntity();
-            toolEntity.setAgentId(agentId);
-            toolEntity.setToolName(tool.getToolName());
-            toolEntity.setToolType(tool.getToolType());
-            toolEntity.setToolConfig(tool.getToolConfig());
-            toolEntity.setPriority(tool.getPriority() != null ? tool.getPriority() : i);
-            agentToolMapper.insert(toolEntity);
-            result.add(toolEntity);
-        }
-        return result;
-    }
-
     private AgentToolResponse toToolResponse(AgentToolEntity entity) {
         return AgentToolResponse.builder()
                 .id(entity.getId())
                 .agentId(entity.getAgentId())
-                .toolName(entity.getToolName())
-                .toolType(entity.getToolType())
-                .toolConfig(entity.getToolConfig())
-                .priority(entity.getPriority())
+                .toolId(entity.getToolId())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();
     }
-
-    // ----------------------------------------------------
-    // Redis 缓存（Redis 不可用时自动降级为直接查库）
-    // ----------------------------------------------------
 
     private String cacheKey(Long agentId) {
         return CACHE_KEY_PREFIX + agentId;

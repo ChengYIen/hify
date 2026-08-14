@@ -67,8 +67,38 @@ public class ChatRequest {
         /** 消息文本内容 */
         private String content;
 
+        /** 模型返回的工具调用请求（role=assistant 时使用） */
+        private List<ToolCall> toolCalls;
+
         /** 工具调用 ID（role=tool 时使用） */
         private String toolCallId;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ToolCall {
+        /** 工具调用 ID */
+        private String id;
+
+        /** 工具类型，通常为 "function" */
+        private String type;
+
+        /** 工具名称与参数 JSON 字符串 */
+        private Function function;
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        public static class Function {
+            /** 工具名称 */
+            private String name;
+
+            /** 参数 JSON 字符串 */
+            private String arguments;
+        }
     }
 
     @Data

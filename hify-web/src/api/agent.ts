@@ -4,16 +4,10 @@ import { get, post, put, del } from '@/utils/request'
 // Types
 // =========================================================================
 
-export type AgentToolData = {
-  toolName: string
-  toolType: string
-  toolConfig?: string
-  priority?: number
-}
-
-export type AgentToolResponse = AgentToolData & {
+export type AgentToolResponse = {
   id: number
   agentId: number
+  toolId: number
   createdAt: string
   updatedAt: string
 }
@@ -68,7 +62,7 @@ export type AgentCreateData = {
   toolsEnabled?: number
   knowledgeIds?: string
   status?: string
-  /** 绑定的工具定义 ID 列表（引用 hify_tool_definition.id） */
+  /** 绑定的工具 ID 列表（引用 hify_mcp_tool.id） */
   toolIds?: number[]
 }
 
@@ -112,9 +106,9 @@ export function updateAgent(id: number, data: AgentUpdateData): Promise<AgentDet
   return put<AgentDetailResponse>(`/v1/agents/${id}`, data)
 }
 
-/** 更新工具列表（全量替换） */
-export function updateAgentTools(id: number, tools: AgentToolData[]): Promise<AgentToolData[]> {
-  return put<AgentToolData[]>(`/v1/agents/${id}/tools`, tools)
+/** 更新工具列表（全量替换，传 toolId 数组） */
+export function updateAgentTools(id: number, toolIds: number[]): Promise<AgentToolResponse[]> {
+  return put<AgentToolResponse[]>(`/v1/agents/${id}/tools`, toolIds)
 }
 
 /** 删除 */

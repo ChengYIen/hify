@@ -2,11 +2,13 @@ package com.hify.module.workflow.model;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
 
 /**
  * Dispatches on the node type and parses the config JSON into the matching
  * {@link NodeConfig} record.
  */
+@Component
 public final class NodeConfigParser {
 
     private final ObjectMapper objectMapper;

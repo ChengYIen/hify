@@ -97,6 +97,22 @@ public class OpenAiAdapter extends AbstractProviderAdapter {
             if (msg.getToolCallId() != null) {
                 m.put("tool_call_id", msg.getToolCallId());
             }
+            if (msg.getToolCalls() != null && !msg.getToolCalls().isEmpty()) {
+                List<Map<String, Object>> toolCalls = new ArrayList<>();
+                for (ChatRequest.ToolCall toolCall : msg.getToolCalls()) {
+                    Map<String, Object> t = new HashMap<>();
+                    t.put("id", toolCall.getId());
+                    t.put("type", toolCall.getType() != null ? toolCall.getType() : "function");
+                    Map<String, Object> f = new HashMap<>();
+                    f.put("name", toolCall.getFunction() != null
+                            ? toolCall.getFunction().getName() : null);
+                    f.put("arguments", toolCall.getFunction() != null
+                            ? toolCall.getFunction().getArguments() : null);
+                    t.put("function", f);
+                    toolCalls.add(t);
+                }
+                m.put("tool_calls", toolCalls);
+            }
             messages.add(m);
         }
         body.put("messages", messages);

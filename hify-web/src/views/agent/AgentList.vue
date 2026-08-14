@@ -14,16 +14,14 @@ import {
   updateAgent,
   updateAgentTools,
   deleteAgent,
-  listToolDefinitions,
   listModelConfigs,
   type AgentListResponse,
   type AgentCreateData,
   type AgentUpdateData,
-  type ToolDefinitionResponse,
-  type AgentToolData,
 } from '@/api/agent'
 import { listKnowledgeBases, type KnowledgeBase } from '@/api/knowledge'
 import { getProviderList } from '@/api/provider'
+import { listMcpTools, type McpTool } from '@/api/mcp'
 
 // =========================================================================
 // Table
@@ -132,15 +130,7 @@ const knowledgeBaseOptions = ref<KnowledgeBase[]>([])
 
 // ---- 工具绑定数据 ----
 
-const allToolDefinitions = ref<ToolDefinitionResponse[]>([])
-/** 当前 Agent 已有工具的 toolName 集合（编辑模式下用来回显选中项） */
-const existingToolNames = ref<Set<string>>(new Set())
-/** 工具类型标签映射 */
-const TOOL_TYPE_LABELS: Record<string, string> = {
-  MCP: 'MCP',
-  BUILTIN: '内置',
-  HTTP: 'HTTP',
-}
+const allMcpTools = ref<McpTool[]>([])
 
 async function loadFormReferenceData(): Promise<void> {
   formLoading.value = true
@@ -148,7 +138,7 @@ async function loadFormReferenceData(): Promise<void> {
     const [models, providers, tools, knowledgeBases] = await Promise.all([
       listModelConfigs(),
       getProviderList({ page: 1, pageSize: 100 }),
-      listToolDefinitions(),
+      listMcpTools(),
       listKnowledgeBases({ page: 1, size: 100 }),
     ])
 
@@ -177,7 +167,7 @@ async function loadFormReferenceData(): Promise<void> {
     }
     providerGroups.value = Array.from(groupMap.values())
 
-    allToolDefinitions.value = tools
+    allMcpTools.value = tools
     knowledgeBaseOptions.value = knowledgeBases.list.filter((kb) => kb.enabled === 1)
   } finally {
     formLoading.value = false
@@ -188,7 +178,6 @@ async function loadFormReferenceData(): Promise<void> {
 
 function handleCreate(): void {
   editingId.value = null
-  existingToolNames.value = new Set()
   loadFormReferenceData().then(() => {
     dialogRef.value?.open({
       status: 'ENABLED',
@@ -207,14 +196,13 @@ async function handleEdit(row: Record<string, unknown>): Promise<void> {
   await loadFormReferenceData()
 
   // 获取 Agent 详情以拿到已绑定的工具列表
-  let currentToolNames: string[] = []
+  let currentToolIds: number[] = []
   try {
     const detail = await getAgent(a.id)
-    currentToolNames = (detail.tools || []).map((t) => t.toolName)
+    currentToolIds = (detail.tools || []).map((t) => t.toolId)
   } catch {
     // 获取详情失败不影响编辑
   }
-  existingToolNames.value = new Set(currentToolNames)
   let selectedKnowledgeIds: number[] = []
   try {
     const parsed = a.knowledgeIds ? JSON.parse(a.knowledgeIds) : []
@@ -223,13 +211,7 @@ async function handleEdit(row: Record<string, unknown>): Promise<void> {
     selectedKnowledgeIds = []
   }
 
-  // 匹配已绑定的工具到 tool definition ID
-  const selectedIds: number[] = []
-  for (const def of allToolDefinitions.value) {
-    if (currentToolNames.includes(def.toolName)) {
-      selectedIds.push(def.id)
-    }
-  }
+  const selectedIds = currentToolIds
 
   dialogRef.value?.open({
     name: a.name,
@@ -268,17 +250,8 @@ async function handleSubmit(data: FormData): Promise<void> {
     }
     await updateAgent(editingId.value, updateData)
 
-    // 更新工具绑定
-    const toolData: AgentToolData[] = selectedToolIds
-      .map((id) => allToolDefinitions.value.find((d) => d.id === id))
-      .filter(Boolean)
-      .map((def, idx) => ({
-        toolName: def!.toolName,
-        toolType: def!.toolType,
-        toolConfig: def!.toolConfig || undefined,
-        priority: idx,
-      }))
-    await updateAgentTools(editingId.value, toolData)
+    // 更新工具绑定（全量替换）
+    await updateAgentTools(editingId.value, selectedToolIds)
 
     notifySuccess('更新成功')
   } else {
@@ -506,25 +479,23 @@ ensureModelConfigsLoaded()
       <!-- 工具绑定 -->
       <el-divider content-position="left">工具绑定</el-divider>
       <div class="tool-binding-area" v-loading="formLoading">
-        <template v-if="allToolDefinitions.length > 0">
+        <template v-if="allMcpTools.length > 0">
           <el-checkbox-group v-model="formData.selectedToolIds" class="tool-checkbox-group">
             <el-checkbox
-              v-for="tool in allToolDefinitions"
+              v-for="tool in allMcpTools"
               :key="tool.id"
               :label="tool.id"
               class="tool-checkbox-item"
             >
               <div class="tool-checkbox-label">
                 <span class="tool-name">{{ tool.toolName }}</span>
-                <el-tag size="small" type="info" effect="plain" class="tool-type-tag">
-                  {{ TOOL_TYPE_LABELS[tool.toolType] || tool.toolType }}
-                </el-tag>
+                <el-tag size="small" type="info" effect="plain" class="tool-type-tag">MCP</el-tag>
               </div>
               <div v-if="tool.description" class="tool-desc">{{ tool.description }}</div>
             </el-checkbox>
           </el-checkbox-group>
         </template>
-        <el-empty v-else description="暂无可用的工具定义" :image-size="60" />
+        <el-empty v-else description="暂无可用的 MCP 工具" :image-size="60" />
       </div>
     </template>
   </HifyFormDialog>

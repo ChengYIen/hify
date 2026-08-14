@@ -6,7 +6,7 @@ import com.hify.module.mcp.controller.dto.McpServerResponse;
 import com.hify.module.mcp.controller.dto.McpServerUpdateRequest;
 
 /**
- * MCP 服务配置业务接口.
+ * MCP Server 管理业务接口.
  */
 public interface McpServerService {
 
@@ -17,10 +17,6 @@ public interface McpServerService {
     McpServerResponse create(McpServerCreateRequest request);
 
     McpServerResponse update(Long id, McpServerUpdateRequest request);
-
-    McpServerResponse enable(Long id);
-
-    McpServerResponse disable(Long id);
 
     void delete(Long id);
 }

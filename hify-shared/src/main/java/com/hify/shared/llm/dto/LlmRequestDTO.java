@@ -38,6 +38,9 @@ public class LlmRequestDTO {
     /** 流式输出（SSE） */
     private boolean stream;
 
+    /** Tool definitions for function calling; null or empty disables tools. */
+    private List<ToolDefinition> tools;
+
     /** 厂商特有参数透传（如 OpenAI 的 top_p / frequency_penalty 等） */
     private Map<String, Object> extra;
 
@@ -54,7 +57,64 @@ public class LlmRequestDTO {
         private String role;
         /** 消息文本内容 */
         private String content;
+
+        /** Tool call requests returned by the model (role=assistant). */
+        private List<ToolCall> toolCalls;
         /** 工具调用 ID（role=tool 时使用） */
         private String toolCallId;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ToolDefinition {
+        /** Tool type, usually "function". */
+        private String type;
+
+        /** Function definition. */
+        private Function function;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Function {
+        /** Function name. */
+        private String name;
+
+        /** Function description. */
+        private String description;
+
+        /** JSON Schema parameters. */
+        private Map<String, Object> parameters;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ToolCall {
+        /** Tool call id returned by the model. */
+        private String id;
+
+        /** Tool type, usually "function". */
+        private String type;
+
+        /** Function name and JSON arguments string. */
+        private Function function;
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        public static class Function {
+            /** Tool name. */
+            private String name;
+
+            /** Arguments JSON string. */
+            private String arguments;
+        }
     }
 }

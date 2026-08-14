@@ -8,7 +8,7 @@ import com.hify.module.agent.controller.dto.AgentCreateRequest;
 import com.hify.module.agent.controller.dto.AgentDetailResponse;
 import com.hify.module.agent.controller.dto.AgentListResponse;
 import com.hify.module.agent.controller.dto.AgentResponse;
-import com.hify.module.agent.controller.dto.AgentToolRequest;
+import com.hify.module.agent.controller.dto.AgentToolResponse;
 import com.hify.module.agent.controller.dto.AgentUpdateRequest;
 import com.hify.module.agent.service.AgentService;
 import jakarta.validation.Valid;
@@ -57,15 +57,14 @@ public class AgentController {
 
     @PutMapping("/{id}")
     public Result<AgentResponse> update(@PathVariable Long id,
-                                         @Valid @RequestBody AgentUpdateRequest request) {
+                                        @Valid @RequestBody AgentUpdateRequest request) {
         return Result.ok(agentService.update(id, request));
     }
 
     @PutMapping("/{id}/tools")
-    public Result<List<AgentToolRequest>> updateTools(
-            @PathVariable Long id,
-            @Valid @RequestBody List<AgentToolRequest> tools) {
-        return Result.ok(agentService.updateTools(id, tools));
+    public Result<List<AgentToolResponse>> updateTools(@PathVariable Long id,
+                                                        @RequestBody List<Long> toolIds) {
+        return Result.ok(agentService.updateTools(id, toolIds));
     }
 
     @DeleteMapping("/{id}")

@@ -36,6 +36,16 @@ const routes: RouteRecordRaw[] = [
     name: 'KnowledgeDocuments',
     component: () => import('@/views/knowledge/KnowledgeDocuments.vue'),
   },
+  {
+    path: '/workflows',
+    name: 'Workflows',
+    component: () => import('@/views/workflow/WorkflowList.vue'),
+  },
+  {
+    path: '/workflows/create',
+    name: 'WorkflowCreate',
+    component: () => import('@/views/workflow/WorkflowCreate.vue'),
+  },
 ]
 
 const router = createRouter({

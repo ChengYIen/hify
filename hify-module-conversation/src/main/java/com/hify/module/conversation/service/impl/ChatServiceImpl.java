@@ -15,6 +15,8 @@ import com.hify.module.conversation.service.ChatContextCache;
 import com.hify.module.conversation.service.ChatMessageService;
 import com.hify.module.conversation.service.ChatService;
 import com.hify.module.conversation.service.ChatSessionService;
+import com.hify.module.workflow.engine.WorkflowEngine;
+import com.hify.module.workflow.repository.entity.WorkflowRunEntity;
 import com.hify.shared.agent.AgentConfigApi;
 import com.hify.shared.agent.dto.AgentConfigDTO;
 import com.hify.shared.llm.LlmProviderApi;
@@ -24,11 +26,16 @@ import com.hify.shared.llm.dto.LlmRequestDTO;
 import com.hify.shared.llm.dto.LlmResponseDTO;
 import com.hify.shared.rag.RagRetrievalApi;
 import com.hify.shared.rag.dto.RagChunkDTO;
+import com.hify.shared.tool.McpToolQueryApi;
+import com.hify.shared.tool.ToolExecutionApi;
+import com.hify.shared.tool.dto.AgentBoundToolDTO;
+import com.hify.shared.tool.dto.ToolResultDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -87,6 +94,9 @@ public class ChatServiceImpl implements ChatService {
     private final LlmProviderApi llmProviderApi;
     private final AgentConfigApi agentConfigApi;
     private final RagRetrievalApi ragRetrievalApi;
+    private final McpToolQueryApi mcpToolQueryApi;
+    private final ToolExecutionApi toolExecutionApi;
+    private final WorkflowEngine workflowEngine;
     private final ChatContextCache chatContextCache;
     private final ChatContextAssembler chatContextAssembler;
     @Qualifier("llmExecutor")
@@ -178,6 +188,11 @@ public class ChatServiceImpl implements ChatService {
         Long sessionId = session.getId();
         AgentConfigDTO agentConfig = resolveAgentConfig(session);
 
+        if (agentConfig != null && agentConfig.getWorkflowId() != null) {
+            streamWorkflowResult(session, content, agentConfig, state);
+            return;
+        }
+
         // 1. 持久化用户消息 —— createUserMessage 自带独立事务，无 LLM 调用（事务不包裹外部 IO）
         chatMessageService.createUserMessage(sessionId, content);
         pushContext(session, agentConfig, "user", content);
@@ -185,7 +200,14 @@ public class ChatServiceImpl implements ChatService {
         // 2. 组装历史：Redis 最近上下文优先，MySQL 回退；含裁剪 + system_prompt 注入
         List<LlmRequestDTO.Message> messages = buildHistoryMessages(session, agentConfig);
 
-        // 3. modelId 为空时由 provider 层 resolveTarget 抛 BizException，落入外层 catch 转 error 事件
+        // 3. Agent 绑定了 MCP 工具时，走「首次非流式 + 工具执行 + 二次流式」链路
+        List<LlmRequestDTO.ToolDefinition> toolSchemas = buildToolSchemas(agentConfig);
+        if (!toolSchemas.isEmpty()) {
+            streamWithTools(session, agentConfig, messages, toolSchemas, state);
+            return;
+        }
+
+        // 4. modelId 为空时由 provider 层 resolveTarget 抛 BizException，落入外层 catch 转 error 事件
         LlmRequestDTO request = LlmRequestDTO.builder()
                 .modelId(session.getModelId())
                 .messages(messages)
@@ -194,10 +216,17 @@ public class ChatServiceImpl implements ChatService {
                 .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
                 .build();
 
-        // 4. 启动 SSE 心跳：LLM 推理期间若长时间无数据，Nginx/云 LB 可能掐断长连接
+        // 5. 工具列表为空时走原有流式推送逻辑，行为与原实现一致
+        streamChatRequest(session, agentConfig, request, state);
+    }
+
+    private void streamChatRequest(ChatSessionResponse session, AgentConfigDTO agentConfig,
+                                   LlmRequestDTO request, StreamState state) {
+        Long sessionId = session.getId();
+        // 启动 SSE 心跳：LLM 推理期间若长时间无数据，Nginx/云 LB 可能掐断长连接
         startHeartbeat(state);
 
-        // 5. 调用共享流式接口 —— delta 实时推给前端，句柄存起来供取消
+        // 调用共享流式接口 —— delta 实时推给前端，句柄存起来供取消
         try {
             LlmStreamHandle handle = llmProviderApi.streamChat(request, new LlmStreamCallback() {
                 @Override
@@ -228,12 +257,228 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
+     * MCP 工具调用流：首次非流式调用获取 tool_calls，执行工具后发起第二次流式调用.
+     */
+    private void streamWithTools(ChatSessionResponse session, AgentConfigDTO agentConfig,
+                                 List<LlmRequestDTO.Message> messages,
+                                 List<LlmRequestDTO.ToolDefinition> toolSchemas,
+                                 StreamState state) {
+        LlmRequestDTO firstRequest = LlmRequestDTO.builder()
+                .modelId(session.getModelId())
+                .messages(messages)
+                .stream(false)
+                .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
+                .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
+                .tools(toolSchemas)
+                .build();
+        startHeartbeat(state);
+
+        LlmResponseDTO firstResponse = llmProviderApi.chat(firstRequest);
+        if (!"tool_calls".equals(firstResponse.getFinishReason())) {
+            // 模型直接给出最终回答：按原有流式推送逻辑把内容推给前端
+            pushNonStreamingResponse(session, agentConfig, firstResponse, state);
+            return;
+        }
+
+        List<LlmRequestDTO.ToolCall> toolCalls = parseToolCalls(firstResponse.getToolCalls());
+        if (toolCalls.isEmpty()) {
+            pushNonStreamingResponse(session, agentConfig, firstResponse, state);
+            return;
+        }
+
+        // 追加 assistant 工具调用消息，保证 role=tool 结果能对应上首次返回的 tool_call_id
+        messages.add(LlmRequestDTO.Message.builder()
+                .role("assistant")
+                .content(firstResponse.getContent())
+                .toolCalls(toolCalls)
+                .build());
+
+        List<AgentBoundToolDTO> boundTools = mcpToolQueryApi.listBoundTools(agentConfig.getId());
+        for (LlmRequestDTO.ToolCall toolCall : toolCalls) {
+            messages.add(executeToolCall(boundTools, toolCall));
+        }
+
+        // 第二次调用走原有流式推送；不带 tools 定义，促使模型基于工具结果给出最终文字回答
+        LlmRequestDTO secondRequest = LlmRequestDTO.builder()
+                .modelId(session.getModelId())
+                .messages(messages)
+                .stream(true)
+                .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
+                .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
+                .build();
+        streamChatRequest(session, agentConfig, secondRequest, state);
+    }
+
+    private List<LlmRequestDTO.ToolDefinition> buildToolSchemas(AgentConfigDTO agentConfig) {
+        if (agentConfig == null || agentConfig.getId() == null) {
+            return List.of();
+        }
+        try {
+            List<AgentBoundToolDTO> tools = mcpToolQueryApi.listBoundTools(agentConfig.getId());
+            if (tools.isEmpty()) {
+                return List.of();
+            }
+            List<LlmRequestDTO.ToolDefinition> schemas = new ArrayList<>(tools.size());
+            for (AgentBoundToolDTO tool : tools) {
+                schemas.add(LlmRequestDTO.ToolDefinition.builder()
+                        .type("function")
+                        .function(LlmRequestDTO.Function.builder()
+                                .name(tool.getToolName())
+                                .description(tool.getDescription())
+                                .parameters(parseInputSchema(tool.getInputSchema()))
+                                .build())
+                        .build());
+            }
+            return schemas;
+        } catch (RuntimeException e) {
+            log.warn("Agent 工具列表加载失败，降级为无工具对话: agentId={}, err={}",
+                    agentConfig.getId(), e.getMessage());
+            return List.of();
+        }
+    }
+
+    private void pushNonStreamingResponse(ChatSessionResponse session, AgentConfigDTO agentConfig,
+                                          LlmResponseDTO response, StreamState state) {
+        String content = response.getContent() == null ? "" : response.getContent();
+        if (!content.isEmpty()) {
+            sendEvent(state, Map.of("type", "delta", "content", content));
+        }
+        persistAndFinish(session, agentConfig, response, state);
+    }
+
+    private List<LlmRequestDTO.ToolCall> parseToolCalls(String toolCallsJson) {
+        if (!StringUtils.hasText(toolCallsJson)) {
+            return List.of();
+        }
+        try {
+            List<LlmRequestDTO.ToolCall> calls = objectMapper.readValue(toolCallsJson,
+                    new TypeReference<List<LlmRequestDTO.ToolCall>>() {});
+            return calls == null ? List.of() : calls;
+        } catch (JsonProcessingException e) {
+            log.warn("解析 LLM tool_calls 失败: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private Map<String, Object> parseInputSchema(String inputSchema) {
+        if (!StringUtils.hasText(inputSchema)) {
+            return Map.of("type", "object", "properties", Map.of());
+        }
+        try {
+            Map<String, Object> schema = objectMapper.readValue(inputSchema,
+                    new TypeReference<Map<String, Object>>() {});
+            return schema == null ? Map.of("type", "object", "properties", Map.of()) : schema;
+        } catch (JsonProcessingException e) {
+            log.warn("解析工具 inputSchema 失败: {}", e.getMessage());
+            return Map.of("type", "object", "properties", Map.of());
+        }
+    }
+
+    /**
+     * 执行单个工具调用；任何失败都转成 tool 消息回填 LLM，不让对话中断.
+     */
+    private LlmRequestDTO.Message executeToolCall(List<AgentBoundToolDTO> boundTools,
+                                                  LlmRequestDTO.ToolCall toolCall) {
+        String toolName = toolCall.getFunction() != null ? toolCall.getFunction().getName() : null;
+        String toolCallId = toolCall.getId();
+        AgentBoundToolDTO boundTool = boundTools.stream()
+                .filter(tool -> toolName != null && toolName.equals(tool.getToolName()))
+                .findFirst()
+                .orElse(null);
+        if (boundTool == null) {
+            log.warn("LLM 调用了未绑定的工具: toolName={}", toolName);
+            return toolResultMessage(toolCallId, "工具不存在或未绑定: " + toolName);
+        }
+        try {
+            ToolResultDTO result = toolExecutionApi.execute(
+                    boundTool.getMcpServerId(), toolName, parseToolArguments(toolCall));
+            String content = Boolean.TRUE.equals(result.getSuccess())
+                    ? result.getContent() : result.getErrorMessage();
+            return toolResultMessage(toolCallId, content == null ? "" : content);
+        } catch (RuntimeException e) {
+            log.warn("MCP 工具调用异常: serverId={}, toolName={}, err={}",
+                    boundTool.getMcpServerId(), toolName, e.getMessage());
+            return toolResultMessage(toolCallId, "工具调用失败: " + e.getMessage());
+        }
+    }
+
+    private Map<String, Object> parseToolArguments(LlmRequestDTO.ToolCall toolCall) {
+        if (toolCall.getFunction() == null
+                || !StringUtils.hasText(toolCall.getFunction().getArguments())) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> arguments = objectMapper.readValue(
+                    toolCall.getFunction().getArguments(),
+                    new TypeReference<Map<String, Object>>() {});
+            return arguments == null ? Map.of() : arguments;
+        } catch (JsonProcessingException e) {
+            log.warn("解析工具参数失败: toolName={}, err={}",
+                    toolCall.getFunction().getName(), e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private LlmRequestDTO.Message toolResultMessage(String toolCallId, String content) {
+        return LlmRequestDTO.Message.builder()
+                .role("tool")
+                .toolCallId(toolCallId)
+                .content(content == null ? "" : content)
+                .build();
+    }
+
+    /**
      * 先持久化助手消息（独立事务），再发送 done 帧 —— 客户端看到 done 时 DB 已可查询到完整回复.
      *
      * <p>done 帧对齐 Dify 的 {@code message_end} 语义：携带 messageId/model/latencyMs/usage
      * 元数据，前端可用 messageId 做点赞、删除等后续操作。流式 usage 当前为 null
      * （adapter 不累积），字段只在本帧铺好，等累积实现后自然透出。</p>
      */
+    private void streamWorkflowResult(ChatSessionResponse session, String content,
+                                      AgentConfigDTO agentConfig, StreamState state) {
+        Long sessionId = session.getId();
+        chatMessageService.createUserMessage(sessionId, content);
+        pushContext(session, agentConfig, "user", content);
+        startHeartbeat(state);
+
+        try {
+            WorkflowRunEntity run = workflowEngine.execute(agentConfig.getWorkflowId(), content);
+            String answer = toWorkflowAnswer(run.getOutput());
+            ChatMessageResponse assistant = chatMessageService.createAssistantMessage(
+                    sessionId, answer, "workflow", null, "stop", null);
+            pushContext(session, agentConfig, "assistant", answer);
+
+            Map<String, Object> done = new HashMap<>();
+            done.put("type", "done");
+            done.put("finishReason", "stop");
+            done.put("messageId", assistant.getId());
+            sendEvent(state, done);
+            finish(state);
+        } catch (BizException e) {
+            cancelHeartbeat(state);
+            log.warn("工作流执行失败: workflowId={}, msg={}",
+                    agentConfig.getWorkflowId(), e.getMessage());
+            sendEvent(state, Map.of("type", "error", "message", e.getMessage()));
+            finish(state);
+        } catch (Exception e) {
+            cancelHeartbeat(state);
+            log.error("工作流执行异常: workflowId={}", agentConfig.getWorkflowId(), e);
+            sendEvent(state, Map.of("type", "error", "message", "工作流执行失败"));
+            finish(state);
+        }
+    }
+
+    private String toWorkflowAnswer(String output) {
+        if (output == null) {
+            return "";
+        }
+        try {
+            return objectMapper.readValue(output, String.class);
+        } catch (JsonProcessingException e) {
+            return output;
+        }
+    }
+
     private void persistAndFinish(ChatSessionResponse session, AgentConfigDTO agentConfig,
                                   LlmResponseDTO response, StreamState state) {
         Long sessionId = session.getId();

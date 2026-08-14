@@ -28,6 +28,7 @@ public class AgentConfigApiImpl implements AgentConfigApi {
                 .name(response.getName())
                 .systemPrompt(response.getSystemPrompt())
                 .modelId(response.getModelConfigId())
+                .workflowId(response.getWorkflowId())
                 .temperature(response.getTemperature() == null
                         ? null
                         : response.getTemperature().doubleValue())

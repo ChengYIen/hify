@@ -49,6 +49,6 @@ public class AgentCreateRequest {
     /** 状态：ENABLED / DISABLED / DRAFT */
     private String status;
 
-    /** 绑定的工具定义 ID 列表（引用 hify_tool_definition.id，可选） */
+    /** 绑定的工具 ID 列表（引用 hify_mcp_tool.id，可选） */
     private List<Long> toolIds;
 }

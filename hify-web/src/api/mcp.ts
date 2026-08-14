@@ -2,10 +2,12 @@ import { get } from '@/utils/request'
 
 export interface McpTool {
   id: number
-  name: string
-  description: string
-  enabled: boolean
+  mcpServerId: number
+  toolName: string
+  description: string | null
+  inputSchema: string | null
   createdAt: string
+  updatedAt: string
 }
 
 export function listMcpTools() {

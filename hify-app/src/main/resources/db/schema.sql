@@ -194,15 +194,13 @@ CREATE TABLE IF NOT EXISTS hify_tool_definition (
 CREATE TABLE IF NOT EXISTS hify_agent_tool (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     agent_id        BIGINT UNSIGNED NOT NULL COMMENT 'Agent ID（关联 hify_agent.id）',
-    tool_name       VARCHAR(128) NOT NULL COMMENT '工具名称',
-    tool_type       VARCHAR(32)  NOT NULL COMMENT '工具类型: MCP / BUILTIN / HTTP',
-    tool_config     JSON         DEFAULT NULL COMMENT '工具配置（JSON，含参数描述、端点等）',
-    priority        INT          NOT NULL DEFAULT 0 COMMENT '排序优先级',
+    tool_id         BIGINT UNSIGNED NOT NULL COMMENT '工具 ID（关联 hify_mcp_tool.id）',
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted         TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=未删 1=已删',
+    UNIQUE KEY uk_agent_tool_agent_tool (agent_id, tool_id),
     INDEX idx_agent_tool_agent (agent_id),
-    INDEX idx_agent_tool_type (tool_type)
+    INDEX idx_agent_tool_tool (tool_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent 工具关联表';
 
 -- ============================================================
@@ -225,6 +223,25 @@ CREATE TABLE IF NOT EXISTS hify_mcp_server (
     deleted         TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=未删 1=已删',
     INDEX idx_mcp_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='MCP 服务配置表';
+
+-- ============================================================
+-- 8.1 MCP 工具表
+-- ============================================================
+-- 连通性测试成功后，把 MCP Server 的 tools/list 结果同步到本表，
+-- Agent 通过 hify_agent_tool 绑定这些工具。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS hify_mcp_tool (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    mcp_server_id   BIGINT UNSIGNED NOT NULL COMMENT '所属 MCP Server ID（关联 hify_mcp_server.id）',
+    tool_name       VARCHAR(128)    NOT NULL COMMENT '工具名称',
+    description     VARCHAR(512)    DEFAULT NULL COMMENT '工具描述',
+    input_schema    JSON            DEFAULT NULL COMMENT '工具入参 JSON Schema',
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted         TINYINT         NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=未删 1=已删',
+    UNIQUE KEY uk_mcp_tool_server_name (mcp_server_id, tool_name),
+    INDEX idx_mcp_tool_server (mcp_server_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='MCP 工具表';
 
 -- ============================================================
 -- 9. 对话会话表
@@ -389,6 +406,38 @@ CREATE TABLE IF NOT EXISTS hify_workflow_execution (
 -- ============================================================
 -- 15. 工作流节点执行详情表
 -- ============================================================
+-- ============================================================
+-- 15.1 工作流引擎执行记录（整次执行）
+-- ============================================================
+CREATE TABLE workflow_run (
+    id           BIGINT    AUTO_INCREMENT PRIMARY KEY,
+    workflow_id  BIGINT    NOT NULL,
+    status       VARCHAR(20) NOT NULL,
+    input        TEXT,
+    output       TEXT,
+    error        VARCHAR(500),
+    elapsed_ms   INT,
+    created_at   DATETIME NOT NULL,
+    finished_at  DATETIME
+);
+
+-- ============================================================
+-- 15.2 工作流引擎执行记录（节点级）
+-- ============================================================
+CREATE TABLE workflow_node_run (
+    id              BIGINT    AUTO_INCREMENT PRIMARY KEY,
+    workflow_run_id BIGINT    NOT NULL,
+    node_key        VARCHAR(64) NOT NULL,
+    node_type       VARCHAR(30) NOT NULL,
+    status          VARCHAR(20) NOT NULL,
+    outputs         JSON,
+    error           VARCHAR(500),
+    elapsed_ms      INT,
+    created_at      DATETIME NOT NULL,
+    finished_at     DATETIME,
+    KEY idx_node_run_run_id (workflow_run_id)
+);
+
 CREATE TABLE IF NOT EXISTS hify_workflow_node_execution (
     id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     execution_id      BIGINT UNSIGNED NOT NULL COMMENT '工作流执行 ID',

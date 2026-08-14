@@ -86,8 +86,10 @@ public enum ErrorCode {
     MCP_TOOL_EXECUTION_FAILED(70006, "MCP 工具执行失败"),
     MCP_SERVER_UNAVAILABLE(70007, "MCP 服务器不可用"),
     MCP_TRANSPORT_NOT_SUPPORTED(70008, "不支持的传输协议"),
+    MCP_SERVER_NOT_FOUND(70009, "MCP 服务器不存在"),
+    MCP_TOOL_CALL_FAILED(70010, "MCP 工具调用失败"),
 
-    // ======================== Auth 10104–10199 ========================
+    // ======================== Auth 10104—10199 ========================
     AUTH_USERNAME_EXISTS(10104, "用户名已存在"),
     AUTH_CREDENTIALS_INVALID(10105, "用户名或密码错误"),
 

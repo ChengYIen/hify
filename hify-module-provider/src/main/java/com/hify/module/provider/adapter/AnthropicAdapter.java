@@ -7,6 +7,8 @@ import com.hify.common.http.LlmHttpClient;
 import com.hify.module.provider.adapter.dto.ChatRequest;
 import com.hify.module.provider.adapter.dto.ChatResponse;
 import com.hify.module.provider.repository.entity.AuthConfig;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,6 +21,7 @@ import java.util.Map;
  * <p>端点：GET /v1/models，POST /v1/messages，认证：x-api-key + anthropic-version 头。
  * 消息格式与 OpenAI 不同：system 是顶级字段，messages 不含 system 角色。</p>
  */
+@Slf4j
 public class AnthropicAdapter extends AbstractProviderAdapter {
 
     private static final String ANTHROPIC_DEFAULT = "https://api.anthropic.com";
@@ -100,18 +103,41 @@ public class AnthropicAdapter extends AbstractProviderAdapter {
             if ("system".equals(msg.getRole())) {
                 // 多个 system 合并为一个（Anthropic 只支持单个 system prompt）
                 body.put("system", msg.getContent());
-            } else {
-                Map<String, Object> m = new HashMap<>();
-                m.put("role", msg.getRole());
-                // Anthropic 用 content 数组而非字符串
-                List<Map<String, Object>> contentList = new ArrayList<>();
-                Map<String, Object> textBlock = new HashMap<>();
-                textBlock.put("type", "text");
-                textBlock.put("text", msg.getContent());
-                contentList.add(textBlock);
-                m.put("content", contentList);
-                conversationMessages.add(m);
+                continue;
             }
+            if ("tool".equals(msg.getRole())) {
+                Map<String, Object> toolMessage = new HashMap<>();
+                toolMessage.put("role", "user");
+                Map<String, Object> toolResult = new HashMap<>();
+                toolResult.put("type", "tool_result");
+                toolResult.put("tool_use_id", msg.getToolCallId());
+                toolResult.put("content", msg.getContent());
+                toolMessage.put("content", List.of(toolResult));
+                conversationMessages.add(toolMessage);
+                continue;
+            }
+            Map<String, Object> m = new HashMap<>();
+            m.put("role", msg.getRole());
+            // Anthropic 用 content 数组而非字符串
+            List<Map<String, Object>> contentList = new ArrayList<>();
+            Map<String, Object> textBlock = new HashMap<>();
+            textBlock.put("type", "text");
+            textBlock.put("text", msg.getContent() == null ? "" : msg.getContent());
+            contentList.add(textBlock);
+            if ("assistant".equals(msg.getRole())
+                    && msg.getToolCalls() != null && !msg.getToolCalls().isEmpty()) {
+                for (ChatRequest.ToolCall toolCall : msg.getToolCalls()) {
+                    Map<String, Object> toolUse = new HashMap<>();
+                    toolUse.put("type", "tool_use");
+                    toolUse.put("id", toolCall.getId());
+                    toolUse.put("name", toolCall.getFunction() != null
+                            ? toolCall.getFunction().getName() : null);
+                    toolUse.put("input", parseToolArguments(toolCall));
+                    contentList.add(toolUse);
+                }
+            }
+            m.put("content", contentList);
+            conversationMessages.add(m);
         }
         body.put("messages", conversationMessages);
 
@@ -236,6 +262,21 @@ public class AnthropicAdapter extends AbstractProviderAdapter {
             return null;
         } catch (JsonProcessingException e) {
             return null;
+        }
+    }
+
+    private Object parseToolArguments(ChatRequest.ToolCall toolCall) {
+        if (toolCall == null || toolCall.getFunction() == null
+                || !StringUtils.hasText(toolCall.getFunction().getArguments())) {
+            return Map.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(toolCall.getFunction().getArguments());
+            return node.isObject() ? objectMapper.convertValue(node, Map.class) : Map.of();
+        } catch (JsonProcessingException e) {
+            log.warn("解析 Anthropic 工具参数失败: toolName={}, err={}",
+                    toolCall.getFunction().getName(), e.getMessage());
+            return Map.of();
         }
     }
 

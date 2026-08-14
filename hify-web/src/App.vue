@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Setting, User, ChatDotRound, Collection, Fold, Expand, HomeFilled } from '@element-plus/icons-vue'
+import { Setting, User, ChatDotRound, Collection, Operation, Fold, Expand, HomeFilled } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -27,6 +27,7 @@ onBeforeUnmount(() => {
 
 /* ---------- 菜单 ---------- */
 const menuItems = [
+  { path: '/workflows', title: '工作流', icon: Operation },
   { path: '/provider',        title: '模型管理',   icon: Setting },
   { path: '/agent',           title: 'Agent 管理', icon: User },
   { path: '/knowledge-bases', title: '知识库',      icon: Collection },

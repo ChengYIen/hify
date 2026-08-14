@@ -198,6 +198,14 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                                 .role(m.getRole())
                                 .content(m.getContent())
                                 .toolCallId(m.getToolCallId())
+                                .toolCalls(toChatToolCalls(m.getToolCalls()))
+                                .build())
+                        .collect(Collectors.toList());
+        List<ChatRequest.ToolDefinition> tools = request.getTools() == null ? null
+                : request.getTools().stream()
+                        .map(t -> ChatRequest.ToolDefinition.builder()
+                                .type(t.getType())
+                                .function(toChatFunction(t.getFunction()))
                                 .build())
                         .collect(Collectors.toList());
 
@@ -209,7 +217,37 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                 .temperature(request.getTemperature())
                 .maxTokens(request.getMaxTokens())
                 .stream(stream)
+                .tools(tools)
                 .extra(request.getExtra())
+                .build();
+    }
+
+    private List<ChatRequest.ToolCall> toChatToolCalls(
+            List<LlmRequestDTO.ToolCall> toolCalls) {
+        if (toolCalls == null) {
+            return null;
+        }
+        return toolCalls.stream()
+                .map(tc -> ChatRequest.ToolCall.builder()
+                        .id(tc.getId())
+                        .type(tc.getType())
+                        .function(tc.getFunction() == null ? null
+                                : ChatRequest.ToolCall.Function.builder()
+                                        .name(tc.getFunction().getName())
+                                        .arguments(tc.getFunction().getArguments())
+                                        .build())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private ChatRequest.Function toChatFunction(LlmRequestDTO.Function function) {
+        if (function == null) {
+            return null;
+        }
+        return ChatRequest.Function.builder()
+                .name(function.getName())
+                .description(function.getDescription())
+                .parameters(function.getParameters())
                 .build();
     }
 

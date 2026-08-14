@@ -21,6 +21,8 @@ public class AgentConfigDTO {
     private String name;
     private String systemPrompt;
     private Long modelId;
+    /** 绑定的工作流 ID，非空时对话直接走工作流执行 */
+    private Long workflowId;
     private Double temperature;
     private Integer maxTokens;
     private Integer maxIterations;

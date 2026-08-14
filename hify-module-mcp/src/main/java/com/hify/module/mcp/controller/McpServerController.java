@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.hify.common.util.PageHelper;
 import com.hify.common.web.PageResult;
 import com.hify.common.web.Result;
+import com.hify.module.mcp.controller.dto.ConnectionTestResult;
 import com.hify.module.mcp.controller.dto.McpServerCreateRequest;
 import com.hify.module.mcp.controller.dto.McpServerResponse;
 import com.hify.module.mcp.controller.dto.McpServerUpdateRequest;
+import com.hify.module.mcp.service.McpConnectivityService;
 import com.hify.module.mcp.service.McpServerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * MCP 服务控制器.
+ * MCP Server 控制器.
  */
 @RestController
 @RequestMapping("/api/v1/mcp-servers")
@@ -29,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class McpServerController {
 
     private final McpServerService mcpServerService;
+    private final McpConnectivityService mcpConnectivityService;
 
     @GetMapping
     public PageResult<McpServerResponse> list(
@@ -52,23 +55,18 @@ public class McpServerController {
 
     @PutMapping("/{id}")
     public Result<McpServerResponse> update(@PathVariable Long id,
-                                             @Valid @RequestBody McpServerUpdateRequest request) {
+                                            @Valid @RequestBody McpServerUpdateRequest request) {
         return Result.ok(mcpServerService.update(id, request));
-    }
-
-    @PutMapping("/{id}/enable")
-    public Result<McpServerResponse> enable(@PathVariable Long id) {
-        return Result.ok(mcpServerService.enable(id));
-    }
-
-    @PutMapping("/{id}/disable")
-    public Result<McpServerResponse> disable(@PathVariable Long id) {
-        return Result.ok(mcpServerService.disable(id));
     }
 
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         mcpServerService.delete(id);
         return Result.ok();
+    }
+
+    @PostMapping("/{id}/test")
+    public Result<ConnectionTestResult> test(@PathVariable Long id) {
+        return Result.ok(mcpConnectivityService.testConnection(id));
     }
 }
