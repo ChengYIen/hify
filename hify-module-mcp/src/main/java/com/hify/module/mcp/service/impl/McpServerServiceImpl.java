@@ -88,6 +88,7 @@ public class McpServerServiceImpl implements McpServerService {
         boolean enabled = request.getEnabled() == null || request.getEnabled();
         McpServerEntity entity = new McpServerEntity();
         entity.setName(request.getName());
+        entity.setDescription(request.getDescription());
         entity.setUrl(request.getEndpoint());
         entity.setTransport(TRANSPORT_STREAMABLE);
         entity.setTimeoutMs(DEFAULT_TIMEOUT_MS);
@@ -109,6 +110,9 @@ public class McpServerServiceImpl implements McpServerService {
                 throw new BizException(ErrorCode.DUPLICATE, "MCP Server 名称已存在: " + request.getName());
             }
             entity.setName(request.getName());
+        }
+        if (request.getDescription() != null) {
+            entity.setDescription(request.getDescription());
         }
         if (StringUtils.hasText(request.getEndpoint())) {
             entity.setUrl(request.getEndpoint());
@@ -164,6 +168,7 @@ public class McpServerServiceImpl implements McpServerService {
         return McpServerResponse.builder()
                 .id(entity.getId())
                 .name(entity.getName())
+                .description(entity.getDescription())
                 .endpoint(entity.getUrl())
                 .enabled("ENABLED".equals(entity.getStatus()))
                 .toolCount(toolCount)

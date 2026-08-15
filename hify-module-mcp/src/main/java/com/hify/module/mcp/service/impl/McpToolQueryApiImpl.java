@@ -60,6 +60,23 @@ public class McpToolQueryApiImpl implements McpToolQueryApi {
         if (agentId == null) {
             return List.of();
         }
-        return mcpToolMapper.selectBoundTools(agentId);
+        List<AgentBoundToolDTO> boundTools = mcpToolMapper.selectBoundTools(agentId);
+        if (boundTools.isEmpty()) {
+            return List.of();
+        }
+        List<Long> serverIds = boundTools.stream()
+                .map(AgentBoundToolDTO::getMcpServerId)
+                .distinct()
+                .toList();
+        Set<Long> enabledServerIds = mcpServerMapper.selectList(
+                        new LambdaQueryWrapper<McpServerEntity>()
+                                .in(McpServerEntity::getId, serverIds))
+                .stream()
+                .filter(server -> "ENABLED".equals(server.getStatus()))
+                .map(McpServerEntity::getId)
+                .collect(Collectors.toSet());
+        return boundTools.stream()
+                .filter(tool -> enabledServerIds.contains(tool.getMcpServerId()))
+                .toList();
     }
 }

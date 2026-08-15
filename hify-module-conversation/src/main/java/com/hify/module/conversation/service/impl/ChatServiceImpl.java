@@ -257,60 +257,65 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * MCP 工具调用流：首次非流式调用获取 tool_calls，执行工具后发起第二次流式调用.
+     * MCP 工具调用流：非流式多轮调用，直到模型给出最终文字答案后推送.
      */
     private void streamWithTools(ChatSessionResponse session, AgentConfigDTO agentConfig,
                                  List<LlmRequestDTO.Message> messages,
                                  List<LlmRequestDTO.ToolDefinition> toolSchemas,
                                  StreamState state) {
-        LlmRequestDTO firstRequest = LlmRequestDTO.builder()
-                .modelId(session.getModelId())
-                .messages(messages)
-                .stream(false)
-                .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
-                .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
-                .tools(toolSchemas)
-                .build();
+        int maxIterations = agentConfig != null && agentConfig.getMaxIterations() != null
+                ? agentConfig.getMaxIterations() : 10;
+        List<AgentBoundToolDTO> boundTools = mcpToolQueryApi.listBoundTools(agentConfig.getId());
         startHeartbeat(state);
 
-        LlmResponseDTO firstResponse = llmProviderApi.chat(firstRequest);
-        if (!"tool_calls".equals(firstResponse.getFinishReason())) {
-            // 模型直接给出最终回答：按原有流式推送逻辑把内容推给前端
-            pushNonStreamingResponse(session, agentConfig, firstResponse, state);
-            return;
+        for (int round = 0; round < maxIterations; round++) {
+            LlmRequestDTO request = LlmRequestDTO.builder()
+                    .modelId(session.getModelId())
+                    .messages(messages)
+                    .stream(false)
+                    .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
+                    .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
+                    .tools(toolSchemas)
+                    .build();
+            LlmResponseDTO response = llmProviderApi.chat(request);
+            if (!"tool_calls".equals(response.getFinishReason())) {
+                pushNonStreamingResponse(session, agentConfig, response, state);
+                return;
+            }
+
+            List<LlmRequestDTO.ToolCall> toolCalls = parseToolCalls(response.getToolCalls());
+            if (toolCalls.isEmpty()) {
+                pushNonStreamingResponse(session, agentConfig, response, state);
+                return;
+            }
+
+            // 追加 assistant 工具调用消息，保证 role=tool 结果能对应上 tool_call_id
+            messages.add(LlmRequestDTO.Message.builder()
+                    .role("assistant")
+                    .content(response.getContent())
+                    .toolCalls(toolCalls)
+                    .build());
+            List<String> executedTools = new ArrayList<>();
+            for (LlmRequestDTO.ToolCall toolCall : toolCalls) {
+                String toolName = toolCall.getFunction() != null
+                        ? toolCall.getFunction().getName() : "unknown";
+                executedTools.add(toolName);
+                messages.add(executeToolCall(boundTools, toolCall));
+            }
+            log.info("MCP 工具执行完成: sessionId={}, round={}, tools={}",
+                    session.getId(), round + 1, String.join(",", executedTools));
         }
 
-        List<LlmRequestDTO.ToolCall> toolCalls = parseToolCalls(firstResponse.getToolCalls());
-        if (toolCalls.isEmpty()) {
-            pushNonStreamingResponse(session, agentConfig, firstResponse, state);
-            return;
-        }
-
-        // 追加 assistant 工具调用消息，保证 role=tool 结果能对应上首次返回的 tool_call_id
-        messages.add(LlmRequestDTO.Message.builder()
-                .role("assistant")
-                .content(firstResponse.getContent())
-                .toolCalls(toolCalls)
-                .build());
-
-        List<AgentBoundToolDTO> boundTools = mcpToolQueryApi.listBoundTools(agentConfig.getId());
-        for (LlmRequestDTO.ToolCall toolCall : toolCalls) {
-            messages.add(executeToolCall(boundTools, toolCall));
-        }
-
-        // 第二次调用走原有流式推送；不带 tools 定义，促使模型基于工具结果给出最终文字回答
-        LlmRequestDTO secondRequest = LlmRequestDTO.builder()
-                .modelId(session.getModelId())
-                .messages(messages)
-                .stream(true)
-                .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
-                .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
-                .build();
-        streamChatRequest(session, agentConfig, secondRequest, state);
+        cancelHeartbeat(state);
+        sendEvent(state, Map.of("type", "error", "message", "工具调用轮数超过上限，请稍后重试"));
+        finish(state);
     }
 
     private List<LlmRequestDTO.ToolDefinition> buildToolSchemas(AgentConfigDTO agentConfig) {
         if (agentConfig == null || agentConfig.getId() == null) {
+            return List.of();
+        }
+        if (agentConfig.getToolsEnabled() != null && !agentConfig.getToolsEnabled()) {
             return List.of();
         }
         try {

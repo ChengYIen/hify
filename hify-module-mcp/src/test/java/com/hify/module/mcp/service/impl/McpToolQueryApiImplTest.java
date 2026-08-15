@@ -68,9 +68,39 @@ class McpToolQueryApiImplTest {
                 .mcpServerId(10L)
                 .build();
         when(mcpToolMapper.selectBoundTools(2L)).thenReturn(List.of(tool));
+        when(mcpServerMapper.selectList(any())).thenReturn(List.of(server(10L, "ENABLED")));
 
         assertThat(queryApi.listBoundTools(2L)).containsExactly(tool);
         assertThat(queryApi.listBoundTools(null)).isEmpty();
+    }
+
+    @Test
+    void shouldOnlyReturnBoundToolsBelongingToEnabledServer() {
+        AgentBoundToolDTO enabledTool = AgentBoundToolDTO.builder()
+                .toolName("query_order")
+                .description("查询订单")
+                .inputSchema("{}")
+                .mcpServerId(10L)
+                .build();
+        AgentBoundToolDTO disabledTool = AgentBoundToolDTO.builder()
+                .toolName("cancel_refund")
+                .description("撤销退款")
+                .inputSchema("{}")
+                .mcpServerId(20L)
+                .build();
+        when(mcpToolMapper.selectBoundTools(2L)).thenReturn(List.of(enabledTool, disabledTool));
+        when(mcpServerMapper.selectList(any())).thenReturn(List.of(
+                server(10L, "ENABLED"),
+                server(20L, "DISABLED")));
+
+        assertThat(queryApi.listBoundTools(2L)).containsExactly(enabledTool);
+    }
+
+    @Test
+    void shouldReturnEmptyWhenNoBoundTools() {
+        when(mcpToolMapper.selectBoundTools(2L)).thenReturn(List.of());
+
+        assertThat(queryApi.listBoundTools(2L)).isEmpty();
     }
 
     private McpToolEntity tool(Long id, Long serverId) {

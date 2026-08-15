@@ -19,6 +19,7 @@ import com.hify.module.provider.repository.entity.Provider;
 import com.hify.module.provider.repository.entity.ProviderHealth;
 import com.hify.module.provider.service.ProviderModelService;
 import com.hify.module.provider.service.ProviderService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -26,6 +27,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.Collections;
 import java.util.List;
@@ -38,6 +40,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Validated
 public class ProviderServiceImpl implements ProviderService {
 
     private final ProviderMapper providerMapper;
@@ -136,13 +139,14 @@ public class ProviderServiceImpl implements ProviderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = CacheNames.PROVIDER, allEntries = true)
-    public ProviderResponse create(ProviderCreateRequest request) {
+    public ProviderResponse create(@Valid ProviderCreateRequest request) {
+        validateApiKeyFormat(request);
         // 校验名称不重复
         Long count = providerMapper.selectCount(
                 new LambdaQueryWrapper<Provider>()
                         .eq(Provider::getName, request.getName()));
         if (count > 0) {
-            throw new BizException(ErrorCode.DUPLICATE, "提供商名称已存在: " + request.getName());
+            throw new BizException(ErrorCode.PROVIDER_NAME_DUPLICATE, "提供商名称已存在: " + request.getName());
         }
 
         Provider entity = new Provider();
@@ -158,6 +162,24 @@ public class ProviderServiceImpl implements ProviderService {
         providerMapper.insert(entity);
         log.info("Provider 创建成功: id={}, name={}, code={}", entity.getId(), entity.getName(), entity.getProviderCode());
         return toResponse(entity);
+    }
+
+    private void validateApiKeyFormat(ProviderCreateRequest request) {
+        if (request.getAuthConfig() == null || !StringUtils.hasText(request.getAuthConfig().getApiKey())) {
+            return;
+        }
+        String providerCode = request.getProviderCode();
+        String apiKey = request.getAuthConfig().getApiKey();
+        boolean formatValid = true;
+        if ("openai".equals(providerCode) || "openai_compatible".equals(providerCode)) {
+            formatValid = apiKey.startsWith("sk-");
+        } else if ("claude".equals(providerCode)) {
+            formatValid = apiKey.startsWith("sk-ant-");
+        }
+        if (!formatValid) {
+            throw new BizException(ErrorCode.PROVIDER_API_KEY_INVALID,
+                    "API Key 格式不正确: " + providerCode);
+        }
     }
 
     @Override

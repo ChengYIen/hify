@@ -12,6 +12,8 @@ public class McpServerCreateRequest {
     @NotBlank(message = "名称不能为空")
     private String name;
 
+    private String description;
+
     @NotBlank(message = "endpoint 不能为空")
     private String endpoint;
 

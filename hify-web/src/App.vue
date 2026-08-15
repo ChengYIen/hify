@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Setting, User, ChatDotRound, Collection, Operation, Fold, Expand, HomeFilled } from '@element-plus/icons-vue'
+import { Setting, User, ChatDotRound, Collection, Operation, Fold, Expand, HomeFilled, Connection, ArrowDown } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -27,15 +27,23 @@ onBeforeUnmount(() => {
 
 /* ---------- 菜单 ---------- */
 const menuItems = [
-  { path: '/workflows', title: '工作流', icon: Operation },
-  { path: '/provider',        title: '模型管理',   icon: Setting },
-  { path: '/agent',           title: 'Agent 管理', icon: User },
-  { path: '/knowledge-bases', title: '知识库',      icon: Collection },
-  { path: '/conversation',    title: '对话',        icon: ChatDotRound },
+  { path: '/provider',        title: '模型管理', icon: Setting },
+  { path: '/agent',           title: 'Agent',   icon: User },
+  { path: '/knowledge-bases', title: '知识库',  icon: Collection },
+  { path: '/workflows',       title: '工作流',  icon: Operation },
+  { path: '/mcp-tools',       title: 'MCP 工具', icon: Connection },
+  { path: '/conversation',    title: '对话',    icon: ChatDotRound },
 ]
 
 function onMenuSelect(path: string) {
   router.push(path)
+}
+
+function handleUserCommand(command: string): void {
+  if (command === 'logout') {
+    localStorage.removeItem('token')
+    router.push('/login')
+  }
 }
 
 /* ---------- 面包屑 ---------- */
@@ -111,12 +119,21 @@ function toggleCollapse() {
           </el-breadcrumb>
         </div>
         <div class="topbar-right">
-          <div class="user-area">
-            <el-avatar :size="32" class="user-avatar">
-              <el-icon :size="18"><User /></el-icon>
-            </el-avatar>
-            <span class="user-name">开发者</span>
-          </div>
+          <el-dropdown trigger="click" @command="handleUserCommand">
+            <div class="user-area">
+              <el-avatar :size="32" class="user-avatar">
+                <el-icon :size="18"><User /></el-icon>
+              </el-avatar>
+              <span class="user-name">Admin</span>
+              <el-icon class="user-caret" :size="12"><ArrowDown /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="settings">个人设置</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>退出</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </header>
 
@@ -144,7 +161,7 @@ function toggleCollapse() {
  * 侧边栏（保持上次设计不变）
  * ================================================================= */
 .sidebar {
-  --sidebar-width:     220px;
+  --sidebar-width:     240px;
   --sidebar-collapsed:  64px;
 
   width:            var(--sidebar-width);
@@ -323,6 +340,15 @@ function toggleCollapse() {
   font-size:   14px;
   font-weight: 500;
   color:       var(--hify-text-secondary);
+}
+
+.user-caret {
+  color: var(--hify-text-tertiary);
+  transition: transform 180ms ease;
+}
+
+.el-dropdown__trigger:focus-visible .user-caret {
+  outline: none;
 }
 
 /* =================================================================

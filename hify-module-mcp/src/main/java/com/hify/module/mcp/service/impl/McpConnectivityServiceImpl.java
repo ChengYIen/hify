@@ -16,6 +16,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * MCP Server 连通性测试实现，成功后把工具列表同步到 hify_mcp_tool.
@@ -57,15 +61,36 @@ public class McpConnectivityServiceImpl implements McpConnectivityService {
     }
 
     private void replaceTools(Long mcpServerId, List<McpToolResponse> tools) {
-        mcpToolMapper.delete(new LambdaQueryWrapper<McpToolEntity>()
-                .eq(McpToolEntity::getMcpServerId, mcpServerId));
+        List<McpToolEntity> existing = mcpToolMapper.selectAllByServerId(mcpServerId);
+        Map<String, McpToolEntity> existingByName = new HashMap<>();
+        for (McpToolEntity entity : existing) {
+            existingByName.put(entity.getToolName(), entity);
+        }
+
+        Set<String> keptNames = new HashSet<>();
         for (McpToolResponse tool : tools) {
-            McpToolEntity entity = new McpToolEntity();
-            entity.setMcpServerId(mcpServerId);
-            entity.setToolName(tool.getToolName());
-            entity.setDescription(tool.getDescription());
-            entity.setInputSchema(tool.getInputSchema());
-            mcpToolMapper.insert(entity);
+            McpToolEntity entity = existingByName.get(tool.getToolName());
+            if (entity == null) {
+                entity = new McpToolEntity();
+                entity.setMcpServerId(mcpServerId);
+                entity.setToolName(tool.getToolName());
+                entity.setDescription(tool.getDescription());
+                entity.setInputSchema(tool.getInputSchema());
+                mcpToolMapper.insert(entity);
+            } else {
+                entity.setDescription(tool.getDescription());
+                entity.setInputSchema(tool.getInputSchema());
+                mcpToolMapper.restoreAndUpdate(entity);
+            }
+            keptNames.add(tool.getToolName());
+        }
+
+        for (McpToolEntity entity : existing) {
+            if (!keptNames.contains(entity.getToolName())
+                    && entity.getDeleted() != null
+                    && entity.getDeleted() == 0) {
+                mcpToolMapper.deleteById(entity.getId());
+            }
         }
     }
 }

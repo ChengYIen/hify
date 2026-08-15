@@ -61,7 +61,7 @@ public class AgentServiceImpl implements AgentService {
     private static final long CACHE_TTL_MINUTES = 10;
 
     @Override
-    @Cacheable(cacheNames = CacheNames.AGENT, key = "'list'")
+    @Cacheable(cacheNames = CacheNames.AGENT, key = "'list:' + #page + ':' + #pageSize")
     public IPage<AgentListResponse> page(int page, int pageSize) {
         Page<AgentEntity> p = new Page<>(page, pageSize);
         Page<AgentEntity> result = agentMapper.selectPage(p,

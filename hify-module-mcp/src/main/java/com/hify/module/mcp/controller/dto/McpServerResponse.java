@@ -15,6 +15,7 @@ public class McpServerResponse {
 
     private Long id;
     private String name;
+    private String description;
     private String endpoint;
     private Boolean enabled;
     private Integer toolCount;

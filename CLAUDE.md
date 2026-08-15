@@ -593,3 +593,193 @@ src/test/java/com/hify/
 | [database-performance-spec.md](docs/database-performance-spec.md) | MySQL 索引、分页、批量操作细则 |
 | [deployment-architecture.md](docs/deployment-architecture.md) | K8s Pod 规格、健康检查、Ingress 配置 |
 | [performance-bottleneck-analysis.md](docs/performance-bottleneck-analysis.md) | 已知瓶颈及处理优先级 |
+
+---
+
+## 十九、系统分析：核心链路 / 风险集中区 / 测试重心
+
+> 本节基于当前代码梳理，新增模块或改动上述链路后应同步更新。
+
+### 19.1 核心链路清单
+
+**1. 客服对话 + MCP 工具多轮调用**
+- 模块/类：`hify-module-conversation` ChatServiceImpl（sendMessage/doStream/streamWithTools/executeToolCall）；`hify-module-agent` AgentConfigApiImpl + AgentServiceImpl；`hify-module-mcp` McpToolQueryApiImpl、ToolExecutionApiImpl、McpClientServiceImpl、DefaultMcpClientFactory；`hify-module-provider` LlmProviderServiceImpl；`hify-shared` LlmProviderApi/ToolExecutionApi。
+- 为什么核心：用户唯一直接触达的主链路，退款场景的 check->submit 多轮工具调用依赖它；这里出问题会表现为对话挂起、工具漏调或重复调用，影响最大。
+
+**2. MCP Server 接入与工具同步**
+- 模块/类：`hify-module-mcp` McpServerController、McpServerServiceImpl、McpConnectivityServiceImpl（testConnection/replaceTools）、McpClientServiceImpl.listToolResponses、McpToolMapper.restoreAndUpdate。
+- 为什么核心：所有外部工具的可用性都来自这条链路；注册/测试失败或工具表不同步，Agent 绑定和调试页会同时失真。
+
+**3. 工具调试链路**
+- 模块/类：`hify-module-mcp` McpDebugServiceImpl -> McpClientServiceImpl.callTool；`hify-web` McpToolDebug.vue。
+- 为什么核心：上线前验证工具行为的主要入口，失败时要能区分是远端 Server、工具名还是参数问题。
+
+**4. 工作流执行链路**
+- 模块/类：`hify-module-workflow` WorkflowEngine.execute、NodeExecutorRegistry、LlmNodeExecutor、ApiCallNodeExecutor、KnowledgeNodeExecutor、ConditionNodeExecutor；`hify-module-conversation` ChatServiceImpl.streamWorkflowResult。
+- 为什么核心：把 LLM、RAG、外部 API 编排成自动化任务，步数上限、循环边和节点超时直接决定任务能否收敛。
+
+**5. 知识库 RAG 检索链路**
+- 模块/类：`hify-module-knowledge` KnowledgeDocumentServiceImpl（异步索引）、EmbeddingService、RagRetrievalApiImpl、ChunkVectorRepository；`hify-module-conversation` ChatServiceImpl.buildHistoryMessages；PostgreSQL pgvector。
+- 为什么核心：客服回答质量和 token 成本由它决定；索引滞后会给出过时答案，检索失败会静默降级为无知识回答。
+
+### 19.2 风险集中区域
+
+**1. ChatServiceImpl.streamWithTools 工具循环（性能/资源、并发）**
+- 失败场景：`hify.llm.agent.total-timeout: 90s` 只存在于 yml，代码没有执行；每轮 LLM 最多重试 3 次 x 60s 读超时，10 轮上限时单请求可远超 300s。SSE 超时后 `cancelLlmCall` 只对 `llmHandle` 生效，工具循环里的同步 `chat()` 取消不掉，llmExecutor 线程继续被占用；并发一多就耗尽 10/50/100 的池子，CallerRuns 策略还会拖住 Tomcat 请求线程。
+
+**2. Agent/工具启停语义失效（数据一致性、行为正确性）**
+- 失败场景：`ChatServiceImpl.buildToolSchemas` 不检查 `AgentConfigDTO.toolsEnabled`，Agent 关闭工具后仍会下发 schema；`McpToolMapper.selectBoundTools` 不校验 `hify_mcp_server.status`，停用 MCP Server 后聊天仍能调用旧工具，与界面的“启用/停用”语义不一致。
+
+**3. AgentServiceImpl.page 缓存 key 固定（数据一致性）**
+- 失败场景：`@Cacheable(cacheNames = AGENT, key = "'list'")` 不区分 page/pageSize，首次请求结果会被后续分页复用；列表页在不同页码看到同一页数据，直到 TTL 或写操作 evict。
+
+**4. McpConnectivityServiceImpl.replaceTools 同步（并发、数据一致性）**
+- 失败场景：非事务；同 Server 并发 test 时两个线程都判断“无旧工具”并 insert 同名工具，触发唯一键 `uk_mcp_tool_server_name` 冲突，其中一个 test 被误报为连接失败；insert/update 成功但 delete 失败会残留已消失的工具，Agent 绑定工具变成“工具不存在或未绑定”。
+
+**5. 认证、限流与 MCP 远端访问（安全）**
+- 失败场景：只有 JWT 认证、无角色授权，任意登录用户可调管理 API；`RateLimiterAspect` 已实现但没有任何 Controller 使用 `@RateLimit`，聊天接口无防刷；`McpDebugRequest.toolName` 不校验是否已同步工具，endpoint 也不校验协议/主机，认证用户可让后端连接任意内网地址（SSRF 面）；`JWT_SECRET` 有可预测的默认值，生产漏配即可伪造 token。
+
+**6. 消息序号与会话上下文并发（并发、数据一致性）**
+- 失败场景：`ChatMessageServiceImpl` 用 `messageCount + 1` 生成 seq，同 session 并发发消息会拿到相同 seq 或丢消息；`ChatContextCache.pushMessage` 的 RPUSH/EXPIRE/LTRIM 非原子，并发写入可能超量或顺序错乱。
+
+**7. 知识库异步索引与跨库一致性（数据一致性、性能）**
+- 失败场景：`KnowledgeDocumentServiceImpl.saveChunks` 的 delete+batchInsert 在 async 线程非事务执行，失败留下半套 chunk；`KnowledgeServiceImpl.delete` 跨 MySQL 和 PG 两个数据源，无分布式事务，一边成功一边失败会残留脏数据；大 PDF 处理占 asyncExecutor（2/4），多文档上传会排队并长期占用。
+
+**8. WorkflowEngine 同步执行（性能、数据一致性）**
+- 失败场景：工作流在 llmExecutor 线程里串行跑整条链，LLM 节点多次调用时长时间占线程；`createRun/completeRun` 是 best-effort，DB 故障时任务照跑但没有审计记录；ConditionNodeExecutor 是简化字符串表达式，引号、contains、大小写边界容易产生错误分支。
+
+### 19.3 测试重心建议
+
+**必须有测试覆盖（P0）**
+- `ChatServiceImpl` 工具循环：多轮连续 tool_calls、工具失败回填 LLM、调用未绑定工具、参数/tool_calls JSON 解析失败、轮数上限、SSE 客户端断开取消、RAG 检索失败降级。现有 `ChatServiceImplToolTest` 只覆盖 happy path、工具失败、无工具三条。
+- `McpConnectivityServiceImpl`：首次全量插入、重复 test 幂等 upsert、逻辑删除恢复、工具消失后清理、连接失败不清空工具、并发 test 唯一键冲突。
+- `McpClientServiceImpl`：`isError=true` 转 BizException、多段 TextContent 拼接、连接超时/拒绝、远端返回空内容。
+- Agent 启停与绑定：`toolsEnabled=false` 不下发 schema、server 停用后 listBoundTools 过滤、分页缓存 key 正确性。
+- 工作流：现有 `WorkflowEngineTest` 已覆盖线性/条件/失败/步数上限，补 API_CALL 与 LLM 节点异常、条件表达式边界、循环边、节点持久化失败。
+- 安全：JwtInterceptor 无 token/过期/伪造、RateLimiterAspect 超限与 Redis 不可用降级、MCP endpoint 协议校验（修复后）。
+- 知识库：`embedAll` 返回数量不匹配、Redis 缓存降级、异步索引失败落 FAILED、删除文档/知识库后的向量残留。
+
+**可以先跳过**
+- 简单 CRUD 的 Controller 层单测（只是 @Valid + 转发，交给集成测试覆盖）。
+- Mapper 的常规 BaseMapper SQL；复杂 join（如 selectBoundTools）用一次真实库集成冒烟即可。
+- 前端纯展示/样式验收，只做一次 E2E 截图确认。
+- 各家 Provider 响应解析差异，只测主用厂商加 mock 一两个兼容厂商。
+- Redis/MySQL/PG 自身的高可用，不属于本代码库单测范围。
+
+---
+
+## 二十、单元测试规范（基于核心链路与风险地图）
+
+> 框架：JUnit 5 + Mockito + MockMvc + AssertJ。本节是第十七章测试规范的细化，优先覆盖第十九章核心链路与风险集中区域。原则：每个风险点至少有一个回归测试，修复 bug 前先补失败用例。
+
+### 20.1 必须写单测的代码
+
+按核心链路优先级排序：
+
+| 优先级 | 链路/风险 | 必测对象 | 最少覆盖场景 |
+|---|---|---|---|
+| P0 | 客服对话 + MCP 工具多轮调用 | `ChatServiceImpl.streamWithTools/executeToolCall/parseToolCalls/buildHistoryMessages` | 多轮连续 tool_calls；工具失败回填 LLM；调用未绑定工具；参数/tool_calls JSON 解析失败；轮数上限；SSE 客户端断开取消；RAG 检索失败降级 |
+| P0 | MCP Server 接入与工具同步 | `McpConnectivityServiceImpl.testConnection/replaceTools`、`McpToolMapper.restoreAndUpdate` | 首次全量插入；重复 test 幂等 upsert；逻辑删除恢复；工具消失后清理；连接失败不清空工具；并发 test 唯一键冲突 |
+| P0 | MCP 工具调用 | `McpClientServiceImpl.callTool/listToolResponses/extractText` | `isError=true` 转 BizException；多段 TextContent 拼接；连接超时/拒绝；远端返回空内容 |
+| P0 | Agent 绑定与启停 | `AgentServiceImpl.updateTools/create/validateToolIds`、`AgentConfigApiImpl`、`McpToolQueryApiImpl` | 超 10 个工具拒绝；不可用工具拒绝；`toolsEnabled=false` 不下发 schema；server 停用后 listBoundTools 过滤；分页缓存 key 正确性 |
+| P0 | 工作流执行 | `WorkflowEngine.execute`、`LlmNodeExecutor`、`ApiCallNodeExecutor`、`KnowledgeNodeExecutor`、`ConditionNodeExecutor` | 线性/条件分支；缺 START/目标节点；步数上限；循环边；节点失败落 FAILED；节点持久化失败仍可执行；条件表达式边界 |
+| P0 | 安全与限流 | `JwtInterceptor`、`JwtUtil`、`RateLimiterAspect`、MCP endpoint 入参校验 | 无 token/过期/伪造；限流超限；Redis 不可用降级；endpoint 协议/主机校验（修复后） |
+| P1 | 知识库 RAG | `EmbeddingService`、`RagRetrievalApiImpl`、`KnowledgeDocumentServiceImpl` 纯逻辑部分 | `embedAll` 返回数量不匹配；Redis 缓存降级；分块不丢不重；异步索引失败落 FAILED |
+| P1 | 上下文与消息 | `ChatContextAssembler`、`ChatContextCache`、`ChatMessageServiceImpl` seq 逻辑 | 轮数/token 预算裁剪；Redis 异常回退 MySQL；同 session 消息 seq 递增 |
+| P1 | Provider 解析 | `OpenAiAdapter`、`AnthropicAdapter`、`OllamaAdapter` 的 `parseChatResponse/extractStreamDelta` | 各家标准响应；SSE 多行增量；`[DONE]` 结束；401/429/5xx 错误分类 |
+| P1 | 纯函数 | `TokenEstimator`、`NodeConfigParser`、`WorkflowDefinitionParser`、`ConditionNodeExecutor.evaluate` | 空值、边界字符、超长文本、非法 JSON |
+
+### 20.2 不写单测、用集成测试替代
+
+- 简单 CRUD Controller：只做 `@Valid` + 转发，用 MockMvc 集成测试覆盖参数校验和响应结构。
+- Mapper/MyBatis SQL：常规 BaseMapper 不测；复杂 join（如 `selectBoundTools`）用 `@MybatisTest` + Testcontainers 或真实库冒烟。
+- MCP Streamable HTTP/SSE 握手与传输：用本地 mock MCP Server 做集成测试，不 mock SDK 内部实现。
+- LLM HTTP/SSE 真实传输：用 WireMock 或本地 mock server；单测和集成测试都严禁真实调用 LLM API。
+- Redis/MySQL/PG 连接、事务和降级：用 Testcontainers 集成测试，不写单测模拟连接池。
+- 前端：只做 E2E 和截图验收。
+- 三方库本身：Spring Boot、MyBatis-Plus、MCP SDK、pgvector 的行为不测。
+
+### 20.3 测试命名规范
+
+统一使用 `should_[期望结果]_when_[输入条件]`，全部小写蛇形，`when` 前用下划线：
+
+```java
+@Test
+void should_executeToolAndReturnFinalAnswer_when_llmRequestsToolCall() {}
+
+@Test
+void should_feedErrorBackToLlm_when_toolCallFails() {}
+
+@Test
+void should_notClearTools_when_connectivityTestFails() {}
+```
+
+规则：一个测试只验证一个行为，条件要能区分输入来源；同一方法的多个分支通过用例名区分，不写 `test1/test2`。
+
+### 20.4 测试结构：Given-When-Then
+
+每个测试强制三段注释，结构顺序固定：
+
+```java
+@Test
+void should_xxx_when_yyy() {
+    // Given
+    ChatSessionResponse session = ...;
+    when(chatSessionService.getById(1L)).thenReturn(session);
+
+    // When
+    chatService.sendMessage(1L, "查询订单", 2L);
+
+    // Then
+    ArgumentCaptor<LlmRequestDTO> captor = ArgumentCaptor.forClass(LlmRequestDTO.class);
+    verify(llmProviderApi, times(2)).chat(captor.capture());
+    assertThat(captor.getAllValues().get(1).getMessages())
+            .extracting(LlmRequestDTO.Message::getRole)
+            .containsExactly("system", "assistant", "tool");
+}
+```
+
+- Given：准备 mock 桩、fixture、入参。
+- When：只调用一个被测 public 方法，不夹带其他行为。
+- Then：用 AssertJ 断言结果，用 `verify` 断言交互次数和捕获参数。
+- 异步逻辑（如 `asyncExecutor`）在 When 前用 `doAnswer` 让任务同步执行，Then 才能稳定断言。
+
+### 20.5 Mock 使用规范
+
+必须 mock 的外部边界：Mapper、`LlmProviderApi`、`McpClientService`、`RagRetrievalApi`、`RedisTemplate`、线程池、时间。
+
+不 mock 的对象：被测类、纯函数/领域逻辑（`ChatContextAssembler`、`NodeConfigParser`、`ConditionNodeExecutor`、`TokenEstimator`）、DTO 和值对象。
+
+其他规则：
+
+- mock 最小化：stub 数量过多说明被测对象依赖太重，优先拆小而不是继续打桩。
+- void 方法用 `doThrow/doAnswer`，不用 `when(...).thenThrow()`。
+- 线程池统一用 `doAnswer` 同步执行 `Runnable`，禁止 `Thread.sleep`。
+- 不用 `Mockito.mockStatic` 除非被测代码确实静态依赖；可用则改为构造器注入。
+- MockitoExtension 自动重置 mock，不在 `@BeforeAll` 共享可变 mock 状态。
+- 测试里不 mock 被测类的私有方法，通过 public 行为断言。
+
+### 20.6 断言规范
+
+统一使用 AssertJ，断言必须验证可观察的业务结果：
+
+- 返回值断言字段值，不用 `assertNotNull` 代替内容校验。
+- 列表断言用 `extracting(...).containsExactly(...)` 验证顺序和内容。
+- 异常断言用 `assertThatThrownBy` 或 `catchThrowable`，同时校验 `ErrorCode` 和 message。
+- 交互断言用 `verify(...).times(n)/never()`，需要验证请求内容时用 `ArgumentCaptor`。
+- 时间类断言只断言范围或 `>= 0`，禁止精确值。
+- 禁止只写“不抛异常”的测试，必须有正向结果断言。
+
+### 20.7 禁止事项
+
+- 单测内真实 HTTP 调用 LLM/MCP/Redis/MySQL/PG。
+- 用 `Thread.sleep` 等待异步任务完成。
+- 精确时间断言（如 `isEqualTo(1000L)`）。
+- 无理由的 `@Disabled/@Ignore`；必须注明 ticket 或原因。
+- 反射调用私有方法；需要测试时拆成 package-private 纯函数。
+- 恒真断言（`assertTrue(true)`、`assertEquals(1, 1)`）。
+- `catch` 吞异常或 `System.out.println` 代替断言。
+- 在测试里复制生产逻辑来计算期望值。
+- 共享可变静态状态导致用例互相污染。
+- 依赖真实自增 ID、数据库顺序或未 seed 的随机数据。
+- 修改被测代码只为了让测试通过而不验证真实行为。

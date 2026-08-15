@@ -55,6 +55,7 @@ public enum ErrorCode {
     PROVIDER_DISABLED(20002, "模型提供商已禁用"),
     PROVIDER_API_KEY_INVALID(20003, "API Key 无效"),
     PROVIDER_CONFIG_ERROR(20004, "提供商配置错误"),
+    PROVIDER_NAME_DUPLICATE(20005, "提供商名称已存在"),
 
     // ======================== Agent 30001–30999 ========================
     AGENT_NOT_FOUND(30001, "Agent 不存在"),

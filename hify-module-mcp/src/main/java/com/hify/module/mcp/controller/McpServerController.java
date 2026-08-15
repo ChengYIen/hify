@@ -5,10 +5,13 @@ import com.hify.common.util.PageHelper;
 import com.hify.common.web.PageResult;
 import com.hify.common.web.Result;
 import com.hify.module.mcp.controller.dto.ConnectionTestResult;
+import com.hify.module.mcp.controller.dto.McpDebugRequest;
+import com.hify.module.mcp.controller.dto.McpDebugResponse;
 import com.hify.module.mcp.controller.dto.McpServerCreateRequest;
 import com.hify.module.mcp.controller.dto.McpServerResponse;
 import com.hify.module.mcp.controller.dto.McpServerUpdateRequest;
 import com.hify.module.mcp.service.McpConnectivityService;
+import com.hify.module.mcp.service.McpDebugService;
 import com.hify.module.mcp.service.McpServerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +35,7 @@ public class McpServerController {
 
     private final McpServerService mcpServerService;
     private final McpConnectivityService mcpConnectivityService;
+    private final McpDebugService mcpDebugService;
 
     @GetMapping
     public PageResult<McpServerResponse> list(
@@ -68,5 +72,11 @@ public class McpServerController {
     @PostMapping("/{id}/test")
     public Result<ConnectionTestResult> test(@PathVariable Long id) {
         return Result.ok(mcpConnectivityService.testConnection(id));
+    }
+
+    @PostMapping("/{id}/debug")
+    public Result<McpDebugResponse> debug(@PathVariable Long id,
+                                          @Valid @RequestBody McpDebugRequest request) {
+        return Result.ok(mcpDebugService.debug(id, request));
     }
 }

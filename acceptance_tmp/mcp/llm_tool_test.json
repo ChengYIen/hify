@@ -1,0 +1,31 @@
+{
+  "model": "deepseek-chat",
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是 Hify 智能客服。当用户询问订单状态、物流、到哪了、发货等时，必须调用 query_order 工具。userId 固定为 u001，orderId 从用户消息中提取数字。"
+    },
+    {
+      "role": "user",
+      "content": "我的订单12345到哪了"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "query_order",
+        "description": "查询订单状态",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "userId": {"type": "string"},
+            "orderId": {"type": "string"}
+          },
+          "required": ["userId", "orderId"]
+        }
+      }
+    }
+  ],
+  "stream": false
+}

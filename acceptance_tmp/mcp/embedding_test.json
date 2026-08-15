@@ -1,0 +1,4 @@
+{
+  "model": "Qwen/Qwen3-Embedding-4B",
+  "input": ["你们的退换货政策是什么"]
+}

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.hify.module.provider.controller.dto.ProviderCreateRequest;
 import com.hify.module.provider.controller.dto.ProviderResponse;
 import com.hify.module.provider.controller.dto.ProviderUpdateRequest;
+import jakarta.validation.Valid;
 
 /**
  * 模型提供商业务接口.
@@ -28,7 +29,7 @@ public interface ProviderService {
     /**
      * 创建提供商，校验名称不重复.
      */
-    ProviderResponse create(ProviderCreateRequest request);
+    ProviderResponse create(@Valid ProviderCreateRequest request);
 
     /**
      * 更新提供商.

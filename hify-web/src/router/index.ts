@@ -46,6 +46,24 @@ const routes: RouteRecordRaw[] = [
     name: 'WorkflowCreate',
     component: () => import('@/views/workflow/WorkflowCreate.vue'),
   },
+  {
+    path: '/mcp',
+    redirect: '/mcp-tools',
+  },
+  {
+    path: '/mcp/:id',
+    redirect: (to) => `/mcp-tools/${to.params.id}/debug`,
+  },
+  {
+    path: '/mcp-tools',
+    name: 'McpToolList',
+    component: () => import('@/views/mcp/McpToolList.vue'),
+  },
+  {
+    path: '/mcp-tools/:id/debug',
+    name: 'McpToolDebug',
+    component: () => import('@/views/mcp/McpToolDebug.vue'),
+  },
 ]
 
 const router = createRouter({

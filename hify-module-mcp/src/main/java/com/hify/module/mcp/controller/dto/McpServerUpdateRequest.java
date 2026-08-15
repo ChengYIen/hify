@@ -10,6 +10,8 @@ public class McpServerUpdateRequest {
 
     private String name;
 
+    private String description;
+
     private String endpoint;
 
     private Boolean enabled;
