@@ -2,12 +2,23 @@
 <configuration scan="false">
 
     <!-- ================================================================ -->
-    <!-- 开发环境：控制台彩色输出                                          -->
+    <!-- 全部日志输出到 stdout，由 K8s（Promtail/Fluent Bit）采集。         -->
+    <!-- 不写文件：backend-deployment 有 2 个副本且无日志 PVC，             -->
+    <!-- 落盘会导致 Pod 重启即丢、两副本各写一半、无法按 traceId 全量检索。 -->
+    <!-- ================================================================ -->
+
+    <!-- traceId/spanId 由 OpenTelemetry 生成，Micrometer Tracing 写入 MDC。
+         %X{traceId} 取的就是 W3C 32 位 traceId，与 traceparent 头一致。 -->
+    <property name="CONSOLE_PATTERN"
+              value="%d{HH:mm:ss.SSS} [%thread] [%X{traceId:-}] %highlight(%-5level) %cyan(%logger{20}) - %msg%n"/>
+
+    <!-- ================================================================ -->
+    <!-- 开发环境：控制台彩色文本（人读），traceId 直接可见                 -->
     <!-- ================================================================ -->
     <springProfile name="dev">
         <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
             <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-                <pattern>%d{HH:mm:ss} [%thread] [%X{traceId}] %highlight(%-5level) %cyan(%logger{20}) - %msg%n</pattern>
+                <pattern>${CONSOLE_PATTERN}</pattern>
                 <charset>UTF-8</charset>
             </encoder>
         </appender>
@@ -23,37 +34,67 @@
     </springProfile>
 
     <!-- ================================================================ -->
-    <!-- 生产环境：JSON 格式输出到文件，按天滚动，保留 30 天               -->
+    <!-- 生产环境：JSON 输出到 stdout                                      -->
+    <!-- 字段：timestamp / level / traceId / spanId / thread / logger /     -->
+    <!--       message（+ 异常 stackTrace）                                 -->
     <!-- ================================================================ -->
     <springProfile name="prod">
-        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-            <file>logs/hify.log</file>
-            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-                <!-- 按天滚动 -->
-                <fileNamePattern>logs/hify.%d{yyyy-MM-dd}.log</fileNamePattern>
-                <!-- 保留 30 天 -->
-                <maxHistory>30</maxHistory>
-                <!-- 最多 10GB 总大小 -->
-                <totalSizeCap>10GB</totalSizeCap>
-            </rollingPolicy>
+        <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-                <!-- 时区设置为 Asia/Shanghai（UTC+8） -->
-                <timeZone>Asia/Shanghai</timeZone>
-                <!-- 自定义字段名，使其更简洁 -->
+                <timeZone>UTC</timeZone>
+
+                <!-- 自定义字段名；[ignore] 表示不输出该字段 -->
                 <fieldNames>
                     <timestamp>timestamp</timestamp>
-                    <version>[ignore]</version>
                     <level>level</level>
                     <thread>thread</thread>
                     <logger>logger</logger>
                     <message>message</message>
+                    <stackTrace>stackTrace</stackTrace>
+                    <!-- 以下为 encoder 默认会输出但本项目不需要的字段 -->
+                    <version>[ignore]</version>
+                    <levelValue>[ignore]</levelValue>
                 </fieldNames>
+
+                <!-- MDC 中只放行 traceId/spanId，避免业务代码误写入 MDC 的内容
+                     （可能含敏感信息）随日志外泄 -->
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+                <includeMdcKeyName>spanId</includeMdcKeyName>
+
+                <!-- 单条日志上限 20KB，防止超长 prompt/工具返回值撑爆日志管道
+                     （CLAUDE.md 第 15 条：禁止输出大文本） -->
+                <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                    <maxLength>8192</maxLength>
+                    <rootCauseFirst>true</rootCauseFirst>
+                </throwableConverter>
             </encoder>
         </appender>
 
-        <root level="WARN">
-            <appender-ref ref="FILE"/>
+        <!-- 异步包装：日志写 stdout 不阻塞业务线程（尤其是 LLM 流式回调线程）。
+             队列满时丢弃 TRACE/DEBUG/INFO，但 WARN/ERROR 永不丢（discardingThreshold=0
+             才会全丢，设为 0 以外的值意味着只丢低级别）。 -->
+        <appender name="ASYNC_JSON" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="JSON_STDOUT"/>
+            <queueSize>1024</queueSize>
+            <discardingThreshold>20</discardingThreshold>
+            <!-- 不阻塞业务线程；应用关闭时最多等 3s 冲刷队列 -->
+            <neverBlock>true</neverBlock>
+            <includeCallerData>false</includeCallerData>
+        </appender>
+
+        <!-- root=INFO：业务关键节点日志（请求进入/LLM 调用/工具调用/异常）
+             必须能进日志管道。原先 root=WARN 会把 application-prod.yml 里
+             com.hify=info 的设置架空，导致生产环境实际看不到任何业务日志。 -->
+        <root level="INFO">
+            <appender-ref ref="ASYNC_JSON"/>
         </root>
+
+        <!-- 框架噪音压到 WARN，避免 INFO 级 root 带来的日志量激增 -->
+        <logger name="org.springframework" level="WARN"/>
+        <logger name="org.apache.ibatis" level="WARN"/>
+        <logger name="com.zaxxer.hikari" level="WARN"/>
+        <logger name="io.lettuce" level="WARN"/>
+        <logger name="okhttp3" level="WARN"/>
     </springProfile>
 
 </configuration>

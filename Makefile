@@ -10,7 +10,7 @@ BACKEND_PORT  ?= 8080
 FRONTEND_PORT ?= 5173
 HEALTH_URL    ?= http://localhost:$(BACKEND_PORT)/api/v1/health
 VERSION       := $(shell grep '<version>' pom.xml | head -1 | sed 's/.*<version>\(.*\)<\/version>/\1/')
-DIST_DIR      := target/dist/hify-$(VERSION)
+PACKAGE_DIR   := target/package/hify-$(VERSION)
 TARBALL       := target/hify-$(VERSION).tar.gz
 MVNW          := ./mvnw
 NPM           := npm
@@ -31,7 +31,7 @@ help: ## 显示帮助
 # 服务控制
 # ============================================================
 
-start: ## 启动所有服务（MySQL/Redis → 后端 → 前端）
+start: ## 启动所有服务（外部依赖检查 → 后端 → 前端）
 	@bash start.sh
 
 stop: ## 停止所有服务（优雅退出 → 超时强制终止）
@@ -74,49 +74,22 @@ clean: clean-maven clean-frontend clean-pids ## 清理所有构建产物
 # 打包
 # ============================================================
 
-package: build ## 打包成可分发的 tar.gz
+package: build ## 打包本地部署 tar.gz（不包含 JDK、MySQL、Redis 或 pgvector）
 	@echo -e "$(GREEN)[PACKAGE]$(NC) 打包 $(TARBALL) ..."
-	@rm -rf $(DIST_DIR)
-	@mkdir -p $(DIST_DIR)/bin
-	@mkdir -p $(DIST_DIR)/backend
-	@mkdir -p $(DIST_DIR)/frontend
-	@mkdir -p $(DIST_DIR)/config
-	@cp start.sh $(DIST_DIR)/bin/
-	@cp stop.sh $(DIST_DIR)/bin/
-	@cp hify-app/target/hify-app-*.jar $(DIST_DIR)/backend/
-	@cp -r hify-web/dist $(DIST_DIR)/frontend/
-	@if [ -f hify-app/src/main/resources/application-prod.yml ]; then \
-	  cp hify-app/src/main/resources/application-prod.yml $(DIST_DIR)/config/; \
-	fi
-	@cat > $(DIST_DIR)/README.md << 'EOF'
-	# Hify AI Agent 对话平台
-
-	## 快速开始
-
-	### 前置要求
-	- JDK 17+
-	- MySQL 8.0+
-	- Redis 7+
-
-	### 启动
-
-	```bash
-	# 1. 配置数据库
-	# 编辑 config/application-prod.yml 中的 MySQL 和 Redis 连接信息
-
-	# 2. 启动后端
-	java -jar backend/hify-app-*.jar --spring.config.location=config/application-prod.yml
-
-	# 3. 前端由 Nginx 托管
-	# 将 frontend/dist/ 指向 Nginx root
-	```
-
-	### 服务端口
-	- 后端 API: http://localhost:8080
-	- 健康检查: http://localhost:8080/api/v1/health
-	EOF
-	@cd target/dist && tar czf ../../$(TARBALL) hify-$(VERSION)
-	@rm -rf target/dist
+	@rm -rf $(PACKAGE_DIR)
+	@mkdir -p $(PACKAGE_DIR)/backend $(PACKAGE_DIR)/frontend
+	@JAR_FILE=$$(find hify-app/target -maxdepth 1 -type f -name 'hify-app-*.jar' ! -name '*.original' | head -1); \
+	  test -n "$$JAR_FILE" || { echo "未找到后端 Jar"; exit 1; }; \
+	  cp "$$JAR_FILE" $(PACKAGE_DIR)/backend/hify-app.jar
+	@cp -r hify-web/dist $(PACKAGE_DIR)/frontend/
+	@cp deploy/local/application.yml $(PACKAGE_DIR)/application.yml
+	@cp deploy/local/start.sh $(PACKAGE_DIR)/start.sh
+	@cp deploy/local/stop.sh $(PACKAGE_DIR)/stop.sh
+	@chmod +x $(PACKAGE_DIR)/start.sh $(PACKAGE_DIR)/stop.sh
+	@mkdir -p target
+	@rm -f $(TARBALL)
+	@tar -czf $(TARBALL) -C target/package hify-$(VERSION)
+	@rm -rf target/package
 	@echo -e "$(GREEN)[PACKAGE]$(NC) 打包完成 → $(TARBALL)"
 
 # ============================================================

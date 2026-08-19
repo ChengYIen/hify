@@ -47,6 +47,7 @@
 
         <!-- 日志 -->
         <logstash-logback-encoder.version>8.0</logstash-logback-encoder.version>
+        <micrometer.version>1.13.6</micrometer.version>
 
         <!-- 工具库 -->
         <lombok.version>1.18.46</lombok.version>
@@ -122,6 +123,18 @@
                 <groupId>net.logstash.logback</groupId>
                 <artifactId>logstash-logback-encoder</artifactId>
                 <version>${logstash-logback-encoder.version}</version>
+            </dependency>
+
+            <!-- Micrometer 核心 + Prometheus registry -->
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-core</artifactId>
+                <version>${micrometer.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-registry-prometheus</artifactId>
+                <version>${micrometer.version}</version>
             </dependency>
 
             <!-- Spring Retry -->

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hify-config
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  SERVER_PORT: "8080"
+  FLYWAY_ENABLED: "true"
+  MYSQL_HOST: "mysql.example.internal"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: "hify"
+  PG_HOST: "postgres.example.internal"
+  PG_PORT: "5432"
+  PG_DATABASE: "hify"
+  REDIS_HOST: "redis.example.internal"
+  REDIS_PORT: "6379"
+  REDIS_DATABASE: "0"
+  HIFY_UPLOAD_DIR: "/var/lib/hify/upload"

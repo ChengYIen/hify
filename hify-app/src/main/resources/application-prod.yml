@@ -1,15 +1,15 @@
 # ======================== 生产环境 ========================
-# 所有敏感值通过 K8s Secret 环境变量注入
+# 所有敏感值通过环境变量注入（Docker 使用 .env，Kubernetes 使用 Secret）
 # 此文件只保留非敏感的生产默认值
 
 spring:
   datasource:
     mysql:
-      jdbc-url: jdbc:mysql://${MYSQL_HOST}:3306/${MYSQL_DATABASE:hify}?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai
+      jdbc-url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:hify}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
       username: ${MYSQL_USER}
       password: ${MYSQL_PASSWORD}
     postgresql:
-      jdbc-url: jdbc:postgresql://${PG_HOST}:5432/${PG_DATABASE:hify}
+      jdbc-url: jdbc:postgresql://${PG_HOST}:${PG_PORT:5432}/${PG_DATABASE:hify}
       username: ${PG_USER}
       password: ${PG_PASSWORD}
 
@@ -17,12 +17,27 @@ spring:
     redis:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
       password: ${REDIS_PASSWORD}
+
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:hify}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    user: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${FLYWAY_BASELINE_VERSION:3}
 
 server:
   port: ${SERVER_PORT:8080}
 
+hify:
+  upload-dir: ${HIFY_UPLOAD_DIR:/var/lib/hify/upload}
+
+# 日志级别与 appender 在 logback-spring.xml 的 prod profile 中定义
+# （JSON → stdout，root=INFO）。此处只保留可用环境变量覆盖的业务级别，
+# 便于线上临时开 debug 排查而无需改镜像。
 logging:
   level:
-    com.hify: info
-    root: warn
+    com.hify: ${LOG_LEVEL_HIFY:info}

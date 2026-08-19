@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hify-prometheus-data
+  labels:
+    app.kubernetes.io/name: hify-prometheus
+    app.kubernetes.io/part-of: hify
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hify-backend-config
+  namespace: hify
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  SERVER_PORT: "8080"
+  FLYWAY_ENABLED: "true"
+  FLYWAY_BASELINE_ON_MIGRATE: "true"
+  FLYWAY_BASELINE_VERSION: "3"
+  MYSQL_HOST: "host.docker.internal"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: "hify"
+  MYSQL_USER: "root"
+  PG_HOST: "host.docker.internal"
+  PG_PORT: "5432"
+  PG_DATABASE: "hify"
+  PG_USER: "hify"
+  REDIS_HOST: "host.docker.internal"
+  REDIS_PORT: "6379"
+  REDIS_DATABASE: "0"
+  HIFY_UPLOAD_DIR: "/var/lib/hify/upload"

@@ -17,6 +17,7 @@ import com.hify.module.conversation.service.ChatService;
 import com.hify.module.conversation.service.ChatSessionService;
 import com.hify.module.workflow.engine.WorkflowEngine;
 import com.hify.module.workflow.repository.entity.WorkflowRunEntity;
+import com.hify.common.metrics.HifyMetrics;
 import com.hify.shared.agent.AgentConfigApi;
 import com.hify.shared.agent.dto.AgentConfigDTO;
 import com.hify.shared.llm.LlmProviderApi;
@@ -32,6 +33,8 @@ import com.hify.shared.tool.dto.AgentBoundToolDTO;
 import com.hify.shared.tool.dto.ToolResultDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.logstash.logback.marker.LogstashMarker;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
@@ -50,6 +53,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+
+import static net.logstash.logback.marker.Markers.append;
 
 /**
  * 对话消息发送业务实现（流式 + 阻塞双模式）.
@@ -105,15 +110,20 @@ public class ChatServiceImpl implements ChatService {
     private final ScheduledThreadPoolExecutor heartbeatScheduler;
     private final ObjectMapper objectMapper;
 
+    @Autowired(required = false)
+    private HifyMetrics metrics;
+
     @Override
     public SseEmitter sendMessage(Long sessionId, String content, Long agentId) {
         // 同步校验（Tomcat 线程）：会话不存在时在返回 emitter 之前抛 BizException；
         // sessionId 为 null 时自动创建新会话（agentId 非空则绑定 Agent，模型按 Agent 解析）。
         ChatSessionResponse session = resolveOrCreateSession(sessionId, content, agentId);
         Long resolvedSessionId = session.getId();
+        HifyMetrics.Sample metricSample = startConversationMetric(session.getAgentId());
+        logConversationStart(session, true, content);
 
         SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MS);
-        StreamState state = new StreamState(emitter, resolvedSessionId);
+        StreamState state = new StreamState(emitter, resolvedSessionId, session.getAgentId(), metricSample);
 
         emitter.onCompletion(() -> log.info("SSE 流结束: sessionId={}", resolvedSessionId));
         // LLM 超时（长时间无数据，心跳兜底后仍超时）：取消 LLM 调用并终止连接
@@ -126,6 +136,7 @@ public class ChatServiceImpl implements ChatService {
         emitter.onError(e -> {
             log.warn("SSE 客户端断开: sessionId={}, error={}", resolvedSessionId, e.getMessage());
             cancelLlmCall(state);
+            finishFailure(state);
         });
 
         llmExecutor.submit(() -> {
@@ -135,9 +146,13 @@ public class ChatServiceImpl implements ChatService {
                 // 异步线程边界：任何异常都必须保证 emitter 收敛，不允许悬挂到超时。
                 // 此处故意用宽 catch —— 否则 RuntimeException（如 modelId 解析失败）会
                 // 让连接挂到超时（有意覆盖 CLAUDE.md「禁止宽 catch」规则）。
-                log.error("流式对话异常: sessionId={}", resolvedSessionId, e);
+                log.error(conversationMarker(session),
+                        "action=conversation_error sessionId={} agentId={} durationMs={} errorType={}",
+                        session.getId(), session.getAgentId(),
+                        metricSample != null ? metricSample.elapsedMillis() : null,
+                        e.getClass().getSimpleName(), e);
                 sendEvent(state, Map.of("type", "error", "message", String.valueOf(e.getMessage())));
-                finish(state);
+                finishFailure(state);
             }
         });
         return emitter;
@@ -147,37 +162,60 @@ public class ChatServiceImpl implements ChatService {
     public ChatMessageResponse sendBlocking(Long sessionId, String content, Long agentId) {
         // 同步校验：会话不存在时在调用 LLM 之前抛 BizException
         ChatSessionResponse session = resolveOrCreateSession(sessionId, content, agentId);
-        AgentConfigDTO agentConfig = resolveAgentConfig(session);
+        HifyMetrics.Sample metricSample = startConversationMetric(session.getAgentId());
+        logConversationStart(session, false, content);
+        try {
+            AgentConfigDTO agentConfig = resolveAgentConfig(session);
 
-        // 1. 持久化用户消息（独立事务，事务不包裹 LLM 调用）
-        chatMessageService.createUserMessage(session.getId(), content);
-        pushContext(session, agentConfig, "user", content);
+            // 1. 持久化用户消息（独立事务，事务不包裹 LLM 调用）
+            chatMessageService.createUserMessage(session.getId(), content);
+            pushContext(session, agentConfig, "user", content);
 
-        // 2. 组装历史（Redis 优先，MySQL 回退；含裁剪 + system_prompt 注入）
-        List<LlmRequestDTO.Message> messages = buildHistoryMessages(session, agentConfig);
+            // 2. 组装历史（Redis 优先，MySQL 回退；含裁剪 + system_prompt 注入）
+            List<LlmRequestDTO.Message> messages = buildHistoryMessages(session, agentConfig);
 
-        // 3. 同步调用 LLM —— 阻塞模式客户端本就等结果，占用请求线程是语义要求
-        LlmRequestDTO request = LlmRequestDTO.builder()
-                .modelId(session.getModelId())
-                .messages(messages)
-                .stream(false)
-                .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
-                .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
-                .build();
-        LlmResponseDTO response = llmProviderApi.chat(request);
-        log.info("LLM 阻塞对话完成: sessionId={}, modelId={}, latencyMs={}",
-                session.getId(), session.getModelId(), response.getLatencyMs());
-
-        // 4. 持久化助手消息并返回（独立事务）
-        ChatMessageResponse assistant = chatMessageService.createAssistantMessage(
-                session.getId(),
-                response.getContent(),
-                response.getModel(),
-                toTokenUsageJson(response.getUsage()),
-                response.getFinishReason(),
-                response.getLatencyMs() != null ? response.getLatencyMs().intValue() : null);
-        pushContext(session, agentConfig, "assistant", response.getContent());
-        return assistant;
+            // 3. Agent 绑定了 MCP 工具时，同步多轮调用直到模型给出最终文字答案；
+            //    未绑定工具则保持原有单次调用行为
+            List<LlmRequestDTO.ToolDefinition> toolSchemas = buildToolSchemas(agentConfig);
+            LlmResponseDTO response;
+            if (toolSchemas.isEmpty()) {
+                LlmRequestDTO request = LlmRequestDTO.builder()
+                        .modelId(session.getModelId())
+                        .messages(messages)
+                        .stream(false)
+                        .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
+                        .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
+                        .build();
+                long llmStartedAt = System.currentTimeMillis();
+                logLlmStart(session, request, 0, false);
+                response = chatWithMetrics(request);
+                logLlmDone(session, response, System.currentTimeMillis() - llmStartedAt);
+            } else {
+                response = runBlockingToolLoop(session, agentConfig, messages, toolSchemas);
+            }
+            // 4. 持久化助手消息并返回（独立事务）
+            ChatMessageResponse assistant = chatMessageService.createAssistantMessage(
+                    session.getId(),
+                    response.getContent(),
+                    response.getModel(),
+                    toTokenUsageJson(response.getUsage()),
+                    response.getFinishReason(),
+                    response.getLatencyMs() != null ? response.getLatencyMs().intValue() : null);
+            pushContext(session, agentConfig, "assistant", response.getContent());
+            logConversationDone(session, response, metricSample);
+            recordConversationMetric(metricSample, session.getAgentId());
+            return assistant;
+        } catch (RuntimeException e) {
+            log.error(conversationMarker(session)
+                            .and(append("durationMs", metricSample != null ? metricSample.elapsedMillis() : null))
+                            .and(append("errorType", e.getClass().getSimpleName())),
+                    "action=conversation_error sessionId={} agentId={} durationMs={} errorType={} message={}",
+                    session.getId(), session.getAgentId(),
+                    metricSample != null ? metricSample.elapsedMillis() : null,
+                    e.getClass().getSimpleName(), e.getMessage(), e);
+            recordConversationMetric(metricSample, session.getAgentId());
+            throw e;
+        }
     }
 
     // ================================================================
@@ -226,6 +264,12 @@ public class ChatServiceImpl implements ChatService {
         // 启动 SSE 心跳：LLM 推理期间若长时间无数据，Nginx/云 LB 可能掐断长连接
         startHeartbeat(state);
 
+        // 关键节点：LLM 流式调用开始
+        long startedAt = System.currentTimeMillis();
+        logLlmStart(session, request, 0, true);
+        state.llmSample = startLlmMetric();
+        state.llmModelId = request.getModelId();
+
         // 调用共享流式接口 —— delta 实时推给前端，句柄存起来供取消
         try {
             LlmStreamHandle handle = llmProviderApi.streamChat(request, new LlmStreamCallback() {
@@ -237,21 +281,44 @@ public class ChatServiceImpl implements ChatService {
                 @Override
                 public void onComplete(LlmResponseDTO response) {
                     cancelHeartbeat(state);
+                    recordLlmMetric(state.llmSample, response, "success", state.llmModelId);
+                    // 关键节点：LLM 流式调用结束（只记 token 数与耗时，不记内容）
+                    logLlmDone(session, response, System.currentTimeMillis() - startedAt);
                     persistAndFinish(session, agentConfig, response, state);
                 }
 
                 @Override
                 public void onError(String message) {
                     cancelHeartbeat(state);
-                    log.warn("LLM 流式错误: sessionId={}, msg={}", sessionId, message);
+                    recordLlmMetric(state.llmSample, "failure", state.llmModelId);
+                    log.warn(conversationMarker(session)
+                                    .and(append("durationMs", System.currentTimeMillis() - startedAt))
+                                    .and(append("success", false))
+                                    .and(append("errorType", "STREAM_ERROR")),
+                            "action=llm_call_error sessionId={} agentId={} durationMs={} success=false errorType={} message={}",
+                            session.getId(), session.getAgentId(),
+                            System.currentTimeMillis() - startedAt, "STREAM_ERROR", message);
                     sendEvent(state, Map.of("type", "error", "message", message));
-                    finish(state);
+                    finishFailure(state);
                 }
             });
             state.llmHandle.set(handle);
         } catch (RuntimeException e) {
             // streamChat 同步抛异常（如 modelId 解析失败）：心跳必须取消，异常交给外层 catch 收敛 emitter
             cancelHeartbeat(state);
+            recordLlmMetric(state.llmSample, "failure", state.llmModelId);
+            throw e;
+        }
+    }
+
+    private LlmResponseDTO chatWithMetrics(LlmRequestDTO request) {
+        HifyMetrics.Sample sample = startLlmMetric();
+        try {
+            LlmResponseDTO response = llmProviderApi.chat(request);
+            recordLlmMetric(sample, response, "success", request.getModelId());
+            return response;
+        } catch (RuntimeException e) {
+            recordLlmMetric(sample, "failure", request.getModelId());
             throw e;
         }
     }
@@ -277,7 +344,7 @@ public class ChatServiceImpl implements ChatService {
                     .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
                     .tools(toolSchemas)
                     .build();
-            LlmResponseDTO response = llmProviderApi.chat(request);
+            LlmResponseDTO response = chatWithMetrics(request);
             if (!"tool_calls".equals(response.getFinishReason())) {
                 pushNonStreamingResponse(session, agentConfig, response, state);
                 return;
@@ -290,25 +357,69 @@ public class ChatServiceImpl implements ChatService {
             }
 
             // 追加 assistant 工具调用消息，保证 role=tool 结果能对应上 tool_call_id
-            messages.add(LlmRequestDTO.Message.builder()
-                    .role("assistant")
-                    .content(response.getContent())
-                    .toolCalls(toolCalls)
-                    .build());
-            List<String> executedTools = new ArrayList<>();
-            for (LlmRequestDTO.ToolCall toolCall : toolCalls) {
-                String toolName = toolCall.getFunction() != null
-                        ? toolCall.getFunction().getName() : "unknown";
-                executedTools.add(toolName);
-                messages.add(executeToolCall(boundTools, toolCall));
-            }
-            log.info("MCP 工具执行完成: sessionId={}, round={}, tools={}",
-                    session.getId(), round + 1, String.join(",", executedTools));
+            appendToolRound(session, round + 1, messages, response, toolCalls, boundTools);
         }
 
         cancelHeartbeat(state);
         sendEvent(state, Map.of("type", "error", "message", "工具调用轮数超过上限，请稍后重试"));
-        finish(state);
+        finishFailure(state);
+    }
+
+    /**
+     * 阻塞模式 MCP 工具调用流：与 streamWithTools 同构，但直接返回最终 LLM 响应.
+     */
+    private LlmResponseDTO runBlockingToolLoop(ChatSessionResponse session, AgentConfigDTO agentConfig,
+                                               List<LlmRequestDTO.Message> messages,
+                                               List<LlmRequestDTO.ToolDefinition> toolSchemas) {
+        int maxIterations = agentConfig != null && agentConfig.getMaxIterations() != null
+                ? agentConfig.getMaxIterations() : 10;
+        List<AgentBoundToolDTO> boundTools = mcpToolQueryApi.listBoundTools(agentConfig.getId());
+
+        for (int round = 0; round < maxIterations; round++) {
+            LlmRequestDTO request = LlmRequestDTO.builder()
+                    .modelId(session.getModelId())
+                    .messages(messages)
+                    .stream(false)
+                    .temperature(agentConfig != null ? agentConfig.getTemperature() : null)
+                    .maxTokens(agentConfig != null ? agentConfig.getMaxTokens() : null)
+                    .tools(toolSchemas)
+                    .build();
+            LlmResponseDTO response = chatWithMetrics(request);
+            if (!"tool_calls".equals(response.getFinishReason())) {
+                return response;
+            }
+            List<LlmRequestDTO.ToolCall> toolCalls = parseToolCalls(response.getToolCalls());
+            if (toolCalls.isEmpty()) {
+                return response;
+            }
+            appendToolRound(session, round + 1, messages, response, toolCalls, boundTools);
+        }
+        throw new BizException(ErrorCode.CONVERSATION_TIMEOUT, "工具调用轮数超过上限，请稍后重试");
+    }
+
+    private void appendToolRound(ChatSessionResponse session, int round,
+                                 List<LlmRequestDTO.Message> messages,
+                                 LlmResponseDTO response,
+                                 List<LlmRequestDTO.ToolCall> toolCalls,
+                                 List<AgentBoundToolDTO> boundTools) {
+        messages.add(LlmRequestDTO.Message.builder()
+                .role("assistant")
+                .content(response.getContent())
+                .toolCalls(toolCalls)
+                .build());
+        List<String> executedTools = new ArrayList<>();
+        for (LlmRequestDTO.ToolCall toolCall : toolCalls) {
+            String toolName = toolCall.getFunction() != null
+                    ? toolCall.getFunction().getName() : "unknown";
+            executedTools.add(toolName);
+            messages.add(executeToolCall(session, boundTools, toolCall));
+        }
+        log.info(conversationMarker(session)
+                        .and(append("round", round))
+                        .and(append("toolCount", executedTools.size())),
+                "action=tool_round_done sessionId={} agentId={} round={} toolCount={} tools={}",
+                session.getId(), session.getAgentId(), round, executedTools.size(),
+                String.join(",", executedTools));
     }
 
     private List<LlmRequestDTO.ToolDefinition> buildToolSchemas(AgentConfigDTO agentConfig) {
@@ -382,27 +493,61 @@ public class ChatServiceImpl implements ChatService {
     /**
      * 执行单个工具调用；任何失败都转成 tool 消息回填 LLM，不让对话中断.
      */
-    private LlmRequestDTO.Message executeToolCall(List<AgentBoundToolDTO> boundTools,
+    private LlmRequestDTO.Message executeToolCall(ChatSessionResponse session,
+                                                  List<AgentBoundToolDTO> boundTools,
                                                   LlmRequestDTO.ToolCall toolCall) {
         String toolName = toolCall.getFunction() != null ? toolCall.getFunction().getName() : null;
         String toolCallId = toolCall.getId();
+        HifyMetrics.Sample toolSample = startToolMetric();
         AgentBoundToolDTO boundTool = boundTools.stream()
                 .filter(tool -> toolName != null && toolName.equals(tool.getToolName()))
                 .findFirst()
                 .orElse(null);
         if (boundTool == null) {
-            log.warn("LLM 调用了未绑定的工具: toolName={}", toolName);
+            recordToolMetric(toolSample, "failure");
+            log.warn(conversationMarker(session)
+                            .and(append("toolName", toolName))
+                            .and(append("success", false))
+                            .and(append("errorType", "TOOL_NOT_BOUND")),
+                    "action=tool_call_error sessionId={} agentId={} toolName={} success=false errorType=TOOL_NOT_BOUND",
+                    session.getId(), session.getAgentId(), toolName);
             return toolResultMessage(toolCallId, "工具不存在或未绑定: " + toolName);
         }
+        // 关键节点：工具调用开始（不记参数内容，可能含用户敏感信息）
+        long startedAt = System.currentTimeMillis();
+        log.info(conversationMarker(session)
+                        .and(append("mcpServerId", boundTool.getMcpServerId()))
+                        .and(append("toolName", toolName))
+                        .and(append("toolCallId", toolCallId)),
+                "action=tool_call_start sessionId={} agentId={} mcpServerId={} toolName={} toolCallId={}",
+                session.getId(), session.getAgentId(), boundTool.getMcpServerId(), toolName, toolCallId);
         try {
             ToolResultDTO result = toolExecutionApi.execute(
                     boundTool.getMcpServerId(), toolName, parseToolArguments(toolCall));
-            String content = Boolean.TRUE.equals(result.getSuccess())
-                    ? result.getContent() : result.getErrorMessage();
+            boolean success = Boolean.TRUE.equals(result.getSuccess());
+            String content = success ? result.getContent() : result.getErrorMessage();
+            recordToolMetric(toolSample, success ? "success" : "failure");
+            // 关键节点：工具调用结束
+            log.info(conversationMarker(session)
+                            .and(append("mcpServerId", boundTool.getMcpServerId()))
+                            .and(append("toolName", toolName))
+                            .and(append("durationMs", System.currentTimeMillis() - startedAt))
+                            .and(append("success", success)),
+                    "action=tool_call_done sessionId={} agentId={} mcpServerId={} toolName={} durationMs={} success={}",
+                    session.getId(), session.getAgentId(), boundTool.getMcpServerId(), toolName,
+                    System.currentTimeMillis() - startedAt, success);
             return toolResultMessage(toolCallId, content == null ? "" : content);
         } catch (RuntimeException e) {
-            log.warn("MCP 工具调用异常: serverId={}, toolName={}, err={}",
-                    boundTool.getMcpServerId(), toolName, e.getMessage());
+            recordToolMetric(toolSample, "failure");
+            log.warn(conversationMarker(session)
+                            .and(append("mcpServerId", boundTool.getMcpServerId()))
+                            .and(append("toolName", toolName))
+                            .and(append("durationMs", System.currentTimeMillis() - startedAt))
+                            .and(append("success", false))
+                            .and(append("errorType", e.getClass().getSimpleName())),
+                    "action=tool_call_error sessionId={} agentId={} mcpServerId={} toolName={} durationMs={} success=false errorType={} message={}",
+                    session.getId(), session.getAgentId(), boundTool.getMcpServerId(), toolName,
+                    System.currentTimeMillis() - startedAt, e.getClass().getSimpleName(), e.getMessage());
             return toolResultMessage(toolCallId, "工具调用失败: " + e.getMessage());
         }
     }
@@ -464,12 +609,12 @@ public class ChatServiceImpl implements ChatService {
             log.warn("工作流执行失败: workflowId={}, msg={}",
                     agentConfig.getWorkflowId(), e.getMessage());
             sendEvent(state, Map.of("type", "error", "message", e.getMessage()));
-            finish(state);
+            finishFailure(state);
         } catch (Exception e) {
             cancelHeartbeat(state);
             log.error("工作流执行异常: workflowId={}", agentConfig.getWorkflowId(), e);
             sendEvent(state, Map.of("type", "error", "message", "工作流执行失败"));
-            finish(state);
+            finishFailure(state);
         }
     }
 
@@ -512,6 +657,7 @@ public class ChatServiceImpl implements ChatService {
             done.put("usage", response.getUsage());
         }
         sendEvent(state, done);
+        logConversationDone(session, response, state.metricSample);
         finish(state);
     }
 
@@ -712,6 +858,112 @@ public class ChatServiceImpl implements ChatService {
         chatContextCache.pushMessage(session.getId(), role, content, maxTurns);
     }
 
+    private LogstashMarker conversationMarker(ChatSessionResponse session) {
+        return append("sessionId", session.getId())
+                .and(append("agentId", session.getAgentId()));
+    }
+
+    private HifyMetrics.Sample startConversationMetric(Long agentId) {
+        return metrics != null ? metrics.conversationStarted(agentId) : null;
+    }
+
+    private void recordConversationMetric(HifyMetrics.Sample sample, Long agentId) {
+        if (metrics == null || sample == null) {
+            return;
+        }
+        metrics.conversationCompleted(sample, agentId);
+    }
+
+    private HifyMetrics.Sample startLlmMetric() {
+        return metrics != null ? metrics.llmCallStarted() : null;
+    }
+
+    private void recordLlmMetric(HifyMetrics.Sample sample, LlmResponseDTO response,
+                                 String result, Long modelId) {
+        if (metrics == null || sample == null) {
+            return;
+        }
+        String provider = response != null && response.getProviderId() != null
+                ? String.valueOf(response.getProviderId())
+                : "unknown";
+        String model = response != null && response.getModel() != null
+                ? response.getModel()
+                : (modelId != null ? String.valueOf(modelId) : "unknown");
+        metrics.llmCallCompleted(sample, provider, model, result);
+    }
+
+    private void recordLlmMetric(HifyMetrics.Sample sample, String result, Long modelId) {
+        if (metrics == null || sample == null) {
+            return;
+        }
+        metrics.llmCallCompleted(sample, "unknown",
+                modelId != null ? String.valueOf(modelId) : "unknown", result);
+    }
+
+    private HifyMetrics.Sample startToolMetric() {
+        return metrics != null ? metrics.mcpToolCallStarted() : null;
+    }
+
+    private void recordToolMetric(HifyMetrics.Sample sample, String result) {
+        if (metrics == null || sample == null) {
+            return;
+        }
+        metrics.mcpToolCallCompleted(sample, result);
+    }
+
+    private void logLlmStart(ChatSessionResponse session, LlmRequestDTO request,
+                             int toolCount, boolean stream) {
+        log.info(conversationMarker(session)
+                        .and(append("modelId", request.getModelId()))
+                        .and(append("toolCount", toolCount))
+                        .and(append("stream", stream)),
+                "action=llm_call_start sessionId={} agentId={} modelId={} tools={} stream={}",
+                session.getId(), session.getAgentId(), request.getModelId(), toolCount, stream);
+    }
+
+    private void logLlmDone(ChatSessionResponse session, LlmResponseDTO response,
+                            long durationMs) {
+        log.info(conversationMarker(session)
+                        .and(append("providerId", response.getProviderId()))
+                        .and(append("modelName", response.getModel()))
+                        .and(append("durationMs", durationMs))
+                        .and(append("success", true))
+                        .and(append("finishReason", response.getFinishReason()))
+                        .and(append("tokens", totalTokens(response.getUsage()))),
+                "action=llm_call_done sessionId={} agentId={} providerId={} modelName={} durationMs={} success=true finishReason={} tokens={}",
+                session.getId(), session.getAgentId(), response.getProviderId(), response.getModel(),
+                durationMs, response.getFinishReason(), totalTokens(response.getUsage()));
+    }
+
+    private void logConversationStart(ChatSessionResponse session, boolean stream, String content) {
+        int contentLength = content != null ? content.length() : 0;
+        log.info(conversationMarker(session)
+                        .and(append("modelId", session.getModelId()))
+                        .and(append("stream", stream))
+                        .and(append("contentLength", contentLength)),
+                "action=conversation_start sessionId={} agentId={} modelId={} stream={} contentLength={}",
+                session.getId(), session.getAgentId(), session.getModelId(), stream, contentLength);
+    }
+
+    private void logConversationDone(ChatSessionResponse session, LlmResponseDTO response,
+                                     HifyMetrics.Sample sample) {
+        long durationMs = sample != null ? sample.elapsedMillis()
+                : (response != null && response.getLatencyMs() != null ? response.getLatencyMs() : 0L);
+        log.info(conversationMarker(session)
+                        .and(append("durationMs", durationMs))
+                        .and(append("success", true))
+                        .and(append("finishReason", response != null ? response.getFinishReason() : null))
+                        .and(append("tokens", totalTokens(response != null ? response.getUsage() : null))),
+                "action=conversation_done sessionId={} agentId={} durationMs={} success=true finishReason={} tokens={}",
+                session.getId(), session.getAgentId(), durationMs,
+                response != null ? response.getFinishReason() : null,
+                totalTokens(response != null ? response.getUsage() : null));
+    }
+
+    private Integer totalTokens(LlmResponseDTO.TokenUsage usage) {
+        return usage != null ? usage.getTotalTokens() : null;
+    }
+
     private String toTokenUsageJson(LlmResponseDTO.TokenUsage usage) {
         if (usage == null) {
             return null;
@@ -771,6 +1023,7 @@ public class ChatServiceImpl implements ChatService {
      * 取消进行中的 LLM 调用（幂等，句柄未就绪时跳过）.
      */
     private void cancelLlmCall(StreamState state) {
+        recordLlmMetric(state.llmSample, "failure", state.llmModelId);
         LlmStreamHandle handle = state.llmHandle.get();
         if (handle != null) {
             handle.cancel();
@@ -781,6 +1034,16 @@ public class ChatServiceImpl implements ChatService {
     private void finish(StreamState state) {
         if (state.finished.compareAndSet(false, true)) {
             cancelHeartbeat(state);
+            recordConversationMetric(state.metricSample, state.agentId);
+            state.emitter.complete();
+        }
+    }
+
+    /** 失败收敛但保持原有 SSE complete 语义。 */
+    private void finishFailure(StreamState state) {
+        if (state.finished.compareAndSet(false, true)) {
+            cancelHeartbeat(state);
+            recordConversationMetric(state.metricSample, state.agentId);
             state.emitter.complete();
         }
     }
@@ -789,6 +1052,7 @@ public class ChatServiceImpl implements ChatService {
     private void finishWithError(StreamState state, ErrorCode code, String message) {
         if (state.finished.compareAndSet(false, true)) {
             cancelHeartbeat(state);
+            recordConversationMetric(state.metricSample, state.agentId);
             state.emitter.completeWithError(new BizException(code, message));
         }
     }
@@ -802,13 +1066,19 @@ public class ChatServiceImpl implements ChatService {
     private static final class StreamState {
         final SseEmitter emitter;
         final Long sessionId;
+        final Long agentId;
+        final HifyMetrics.Sample metricSample;
+        volatile HifyMetrics.Sample llmSample;
+        volatile Long llmModelId;
         final AtomicReference<LlmStreamHandle> llmHandle = new AtomicReference<>();
         final AtomicBoolean finished = new AtomicBoolean(false);
         volatile ScheduledFuture<?> heartbeat;
 
-        StreamState(SseEmitter emitter, Long sessionId) {
+        StreamState(SseEmitter emitter, Long sessionId, Long agentId, HifyMetrics.Sample metricSample) {
             this.emitter = emitter;
             this.sessionId = sessionId;
+            this.agentId = agentId;
+            this.metricSample = metricSample;
         }
     }
 }

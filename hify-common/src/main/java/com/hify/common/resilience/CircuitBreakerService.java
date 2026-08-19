@@ -1,11 +1,13 @@
 package com.hify.common.resilience;
 
 import com.hify.common.http.LlmApiException;
+import com.hify.common.metrics.HifyMetrics;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.net.ConnectException;
@@ -49,12 +51,22 @@ public class CircuitBreakerService {
     private static final String DEFAULT_CONFIG = "llm-default";
 
     private final CircuitBreakerRegistry cbRegistry;
+    private final HifyMetrics metrics;
 
     /** 按 providerName 缓存 Retry 实例，避免重复创建 */
     private final Map<String, Retry> retryCache = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> stateListenerRegistered = new ConcurrentHashMap<>();
 
     public CircuitBreakerService(CircuitBreakerRegistry cbRegistry) {
+        this(cbRegistry, null);
+    }
+
+    @Autowired
+    public CircuitBreakerService(CircuitBreakerRegistry cbRegistry, HifyMetrics metrics) {
         this.cbRegistry = cbRegistry;
+        this.metrics = metrics;
+        cbRegistry.getAllCircuitBreakers()
+                .forEach(circuitBreaker -> registerStateListener(circuitBreaker.getName(), circuitBreaker));
         log.info("CircuitBreakerService 初始化完成");
     }
 
@@ -73,11 +85,13 @@ public class CircuitBreakerService {
      * @return 该 provider 专属的熔断器实例
      */
     public CircuitBreaker getOrCreate(String providerName) {
-        return cbRegistry.find(providerName)
+        CircuitBreaker circuitBreaker = cbRegistry.find(providerName)
                 .orElseGet(() -> {
                     log.info("动态创建熔断器 provider={} config={}", providerName, DEFAULT_CONFIG);
                     return cbRegistry.circuitBreaker(providerName, DEFAULT_CONFIG);
                 });
+        registerStateListener(providerName, circuitBreaker);
+        return circuitBreaker;
     }
 
     // ================================================================
@@ -145,6 +159,28 @@ public class CircuitBreakerService {
      */
     public CircuitBreaker.Metrics getMetrics(String providerName) {
         return getOrCreate(providerName).getMetrics();
+    }
+
+    private void registerStateListener(String providerName, CircuitBreaker circuitBreaker) {
+        if (metrics == null) {
+            return;
+        }
+        if (stateListenerRegistered.putIfAbsent(providerName, Boolean.TRUE) != null) {
+            return;
+        }
+        metrics.circuitBreakerState(providerName, toStateCode(circuitBreaker.getState()));
+        circuitBreaker.getEventPublisher().onStateTransition(event ->
+                metrics.circuitBreakerState(providerName,
+                        toStateCode(event.getStateTransition().getToState())));
+    }
+
+    private int toStateCode(CircuitBreaker.State state) {
+        return switch (state) {
+            case CLOSED -> 0;
+            case OPEN -> 1;
+            case HALF_OPEN -> 2;
+            default -> -1;
+        };
     }
 
     // ================================================================

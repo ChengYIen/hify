@@ -1,5 +1,7 @@
 # ======================== 公共配置 + 默认值 ========================
 spring:
+  application:
+    name: ${SPRING_APPLICATION_NAME:hify}
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
 
@@ -7,21 +9,26 @@ spring:
   datasource:
     mysql:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/hify?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+      jdbc-url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:hify}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
       username: ${MYSQL_USER:root}
       password: ${MYSQL_PASSWORD:}
+      maximum-pool-size: ${MYSQL_POOL_MAX_SIZE:10}
+      minimum-idle: ${MYSQL_POOL_MIN_IDLE:2}
     # --- 数据源：PostgreSQL（向量数据） ---
     postgresql:
       driver-class-name: org.postgresql.Driver
-      jdbc-url: jdbc:postgresql://${PG_HOST:localhost}:5432/hify
+      jdbc-url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/${PG_DATABASE:hify}
       username: ${PG_USER:hify}
       password: ${PG_PASSWORD:}
+      maximum-pool-size: ${PG_POOL_MAX_SIZE:5}
+      minimum-idle: ${PG_POOL_MIN_IDLE:1}
 
   # --- Redis ---
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
       password: ${REDIS_PASSWORD:}
       timeout: 5000ms
       lettuce:
@@ -38,7 +45,8 @@ spring:
 
   # --- Flyway（数据库迁移） ---
   flyway:
-    enabled: false
+    enabled: ${FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
 
 # ======================== MyBatis-Plus ========================
 mybatis-plus:
@@ -56,21 +64,53 @@ mybatis-plus:
 server:
   port: ${SERVER_PORT:8080}
 
-# ======================== Actuator 健康检查 ========================
+# ======================== Actuator + 链路追踪 ========================
 management:
+  # 管理端点独立端口，与业务 8080 隔离；Prometheus 抓取 hify-backend:8081/actuator/prometheus
+  server:
+    port: ${MANAGEMENT_PORT:8081}
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,prometheus
+  metrics:
+    tags:
+      application: ${SPRING_APPLICATION_NAME:hify}
   endpoint:
     health:
       probes:
         enabled: true
       show-details: when-authorized
 
+  # OpenTelemetry 链路追踪 —— 一期只用它生成 traceId 串联日志，不接 Jaeger/Zipkin。
+  # 没有 exporter 依赖时 span 只在内存中产生 traceId 后丢弃，无网络开销。
+  tracing:
+    enabled: true
+    sampling:
+      # 必须 1.0：默认 0.1 会让 90% 的请求拿不到有效 traceId（MDC 里是全零），
+      # 日志串联就断了。一期不导出 span，全量采样没有存储成本。
+      probability: 1.0
+    propagation:
+      # W3C traceparent —— OTel 标准格式，将来接 Jaeger/Tempo 或对齐
+      # Ingress 的 trace 时不需要改动代码
+      type: w3c
+
+  observations:
+    http:
+      server:
+        requests:
+          # SSE 流式对话 + 健康检查不建 span：前者生命周期长达数分钟会拉长
+          # span 统计失真，后者是纯噪音
+          name: http.server.requests
+
+# OTel resource 属性：日志采集侧可按 service.name 过滤
+otel:
+  service:
+    name: ${OTEL_SERVICE_NAME:hify}
+
 # ======================== Hify 业务配置 ========================
 hify:
-  upload-dir: upload
+  upload-dir: ${HIFY_UPLOAD_DIR:upload}
   llm:
     timeout:
       connect: 10s

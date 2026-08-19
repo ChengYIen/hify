@@ -3,6 +3,7 @@ package com.hify.common.config;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.support.ContextPropagatingTaskDecorator;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -22,6 +23,20 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <tr><td>asyncExecutor</td><td>2/4</td><td>100</td><td>CallerRuns</td><td>文档处理、日志异步写入等后台任务</td></tr>
  *   <tr><td>heartbeatScheduler</td><td>2（调度器）</td><td>-</td><td>-</td><td>SSE 心跳保活（周期任务，daemon）</td></tr>
  * </table>
+ *
+ * <h3>traceId 跨线程传播</h3>
+ * <p>
+ * traceId 存放在 ThreadLocal 中，任务一旦提交到线程池就会丢失 —— 而 LLM 调用、
+ * 工具循环恰好全部运行在 {@code llmExecutor} 里，正是最需要追踪的那一段。
+ * 因此两个业务线程池都装上 {@link ContextPropagatingTaskDecorator}：
+ * 提交时快照当前线程的追踪上下文，在工作线程中恢复，任务结束后自动清理
+ * （线程复用不会串味）。这样同一次请求从 Tomcat 线程到 llmExecutor 线程
+ * 共享同一个 traceId。
+ * </p>
+ * <p>
+ * {@code heartbeatScheduler} 不装：它跑的是与业务请求无关的周期性 {@code :ping}，
+ * 且提交时机在流开启后，装了反而会把首个请求的 traceId 固定绑到后续所有心跳上。
+ * </p>
  */
 @Slf4j
 @Configuration
@@ -50,10 +65,12 @@ public class ThreadPoolConfig {
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("llm-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // traceId 跨线程传播：LLM 调用/工具循环的日志才能挂在同一条链路上
+        executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
         executor.initialize();
-        log.info("llmExecutor 初始化完成: core=10, max=50, queue=100, reject=CallerRuns");
+        log.info("llmExecutor 初始化完成: core=10, max=50, queue=100, reject=CallerRuns, tracePropagation=on");
         return executor;
     }
 
@@ -76,10 +93,12 @@ public class ThreadPoolConfig {
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("async-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // traceId 跨线程传播：文档索引等后台任务可回溯到触发它的那次请求
+        executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
         executor.initialize();
-        log.info("asyncExecutor 初始化完成: core=2, max=4, queue=100, reject=CallerRuns");
+        log.info("asyncExecutor 初始化完成: core=2, max=4, queue=100, reject=CallerRuns, tracePropagation=on");
         return executor;
     }
 

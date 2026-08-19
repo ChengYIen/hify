@@ -32,7 +32,7 @@ public class RedisHealthIndicator implements HealthIndicator {
                     .build();
         } catch (Exception e) {
             return Health.down()
-                    .withDetail("redis", e.getMessage())
+                    .withDetail("error", e.getMessage())
                     .build();
         }
     }

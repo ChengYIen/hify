@@ -29,6 +29,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(requestLogInterceptor)
                 .addPathPatterns("/**")
                 .excludePathPatterns(
+                        "/api/v1/health",
                         "/actuator/health/**" // 健康检查不打日志，避免噪音
                 );
 

@@ -1,0 +1,15 @@
+.git
+.gitignore
+.pids
+.accptest
+.claude
+.vscode
+accept
+acceptance_tmp
+target
+hify-app/target
+hify-web/node_modules
+hify-web/dist
+hify-app/upload
+*.log
+*.pid

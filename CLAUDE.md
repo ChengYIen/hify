@@ -173,6 +173,18 @@ public class R<T> {
 
 15. **禁止在生产日志中输出：** 大文本（JSON > 10KB）、大对象全量 toString、敏感信息（密码/Token/手机号/身份证/银行卡）。手机号脱敏 `138****0000`。
 
+### 5.1 结构化日志与链路字段
+
+- **生产日志必须输出 JSON 到 stdout**，由 K8s 日志系统采集；禁止业务代码自行写本地日志文件。
+- **JSON 顶层必填字段：** `timestamp`、`level`、`traceId`、`thread`、`logger`、`message`。异常日志可额外输出 `stackTrace`。
+- **`traceId` 必须由 OpenTelemetry/Micrometer Tracing 生成。** 禁止业务代码自行生成 UUID、覆盖 MDC 中的 `traceId`，或另设一套请求链路 ID。
+- **同一次请求的日志必须共享同一个 `traceId`。** 任务提交到 `llmExecutor`、`asyncExecutor` 或其他异步回调线程时，必须传播 tracing context；OkHttp/MCP 等异步回调也必须恢复上下文。
+- **统一使用 W3C Trace Context（`traceparent`）传播。** 可通过响应头 `X-Trace-Id` 将 traceId 返回给前端，便于用户反馈问题时定位日志。
+- **推荐业务字段：** `userId`、`sessionId`、`agentId`、`conversationRunId`、`workflowRunId`、`workflowNodeRunId`、`llmCallId`、`provider`、`model`、`mcpServerId`、`toolName`、`operation`、`durationMs`、`result`、`errorType`、`errorCode`。
+- **业务字段只记录可检索的摘要和标识，不记录内容本身。** 禁止记录 prompt、完整用户消息、完整 LLM 响应、MCP 参数/返回值、RAG 原文和 API Key；可记录长度、数量、token 数、hash、状态和耗时。
+- **对话链路必须记录关键节点：** 请求进入/完成、LLM 调用开始/结束/异常、工具调用开始/结束/异常、最终对话成功/失败/取消/超时。
+- **不要把高基数业务 ID 放进指标标签。** `sessionId`、`userId`、`conversationRunId`、动态工具名等放日志或 trace；指标标签只使用有限枚举值，如 `provider`、`model`、`operation`、`errorType`。
+
 ---
 
 ## 六、并发与线程池
@@ -314,6 +326,9 @@ public void handleMessage(MessageRequest request) {
 - [ ] application.yml 里是否有硬编码密码/密钥？
 - [ ] 大表查询是否用了游标分页而非 OFFSET？
 - [ ] 敏感字段是否脱敏日志输出？
+- [ ] 生产日志是否为 JSON stdout，并包含 `timestamp`、`level`、`traceId`、`thread`、`logger`、`message`？
+- [ ] 是否禁止手动生成/覆盖 `traceId`，并为异步线程和回调传播 tracing context？
+- [ ] 对话关键节点是否记录了开始、结束、异常及耗时，且未输出 prompt/响应原文？
 - [ ] 是否使用了 `@Slf4j` 而非手动创建 Logger？
 - [ ] SQL 是否只在 Mapper 层？（搜索 Service 层有没有拼 SQL）
 - [ ] 索引列上是否有函数调用或前缀模糊查询？

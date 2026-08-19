@@ -14,6 +14,7 @@
 | Node.js | 18+ | `node -v` 确认 |
 | MySQL | 8.0+ | 业务数据存储 |
 | Redis | 7+ | 缓存 / 会话状态 |
+| PostgreSQL | 16+ + pgvector | 知识库向量存储 |
 
 > **JDK 25+ 用户注意：** 先执行 `make fix-jdk`（或手动创建 `.mvn/jvm.config` 添加 `--add-opens`）
 
@@ -27,12 +28,11 @@ cd hify
 ### 3. 初始化数据库
 
 ```bash
-# 创建开发数据库
+# 创建开发数据库（仅创建数据库，表结构由 Flyway 负责）
 mysql -uroot -p < db/init.sql
 
-# 修改密码（如果需要）
-# 编辑 hify-app/src/main/resources/application-dev.yml
-#   将 MySQL password 改成你的密码
+# 修改连接参数（如果需要）
+# 通过 MYSQL_*/PG_*/REDIS_* 环境变量覆盖默认值
 ```
 
 ### 4. 启动
@@ -46,7 +46,7 @@ bash start.sh
 ```
 
 脚本会自动：
-1. 检查 MySQL / Redis 是否可用
+1. 检查 MySQL / Redis / PostgreSQL 端口是否可用
 2. `npm install`（首次）
 3. Maven 全量构建（跳过测试）
 4. 后台启动后端，轮询等待健康检查通过
@@ -67,6 +67,32 @@ make stop   # 或 bash stop.sh
 ```
 
 ---
+
+## 部署
+
+正式部署只连接外部 MySQL、Redis 和 PostgreSQL + pgvector，不在 Hify
+交付包中启动这些基础设施。
+
+- Docker Compose：复制 `deploy/env.template` 为 `.env` 后执行
+  `docker compose up -d --build`
+- Kubernetes：`kubectl apply -k k8s`
+- JAR/systemd：参考 [docs/deployment-guide.md](docs/deployment-guide.md)
+
+Docker Compose 使用根目录 `.env` 注入外部 MySQL、Redis、
+PostgreSQL/pgvector 的连接信息；外部服务地址不能填写 `localhost`。
+宿主机端口冲突时，修改 `.env` 中的 `FRONTEND_EXPOSE_PORT` 或
+`BACKEND_EXPOSE_PORT`。
+
+```bash
+cp deploy/env.template .env
+vi .env
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend
+```
+
+完整的外部服务配置、数据库初始化、文件持久化和探针说明见
+[docs/deployment-guide.md](docs/deployment-guide.md)。
 
 ## 常用命令
 
@@ -96,6 +122,7 @@ hify/
 ├── hify-module-workflow/     # 工作流执行
 ├── hify-module-mcp/          # MCP 工具接入
 ├── hify-web/                 # Vue 3 前端
+├── deploy/local/             # 本地发布包模板与启停脚本
 ├── db/init.sql               # 数据库初始化脚本
 ├── start.sh / stop.sh        # 启停脚本
 ├── Makefile                  # 构建/启停/打包
@@ -119,7 +146,7 @@ hify/
 A: 这只是一个警告，不影响运行。后端可能通过 `mvnw` 包装器启动，PID 已用 Maven wrapper 的 PID。
 
 **Q: MySQL 连接失败？**
-A: 检查 `application-dev.yml` 中的用户名密码是否与本地 MySQL 一致。默认 `root/root`。
+A: 检查 `MYSQL_*` 环境变量是否与本地 MySQL 一致。默认用户名为 `root`，密码为 `123456`。
 
 **Q: 前端代理报 502？**
 A: 确保后端 8080 端口已启动成功（访问 http://localhost:8080/api/v1/health 确认）。

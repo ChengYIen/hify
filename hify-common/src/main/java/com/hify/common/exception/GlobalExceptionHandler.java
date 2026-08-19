@@ -1,12 +1,15 @@
 package com.hify.common.exception;
 
+import com.hify.common.config.TraceIdFilter;
 import com.hify.common.web.Result;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -126,8 +129,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<Void> handleException(Exception e) {
+        // 关键节点：异常。traceId 由 MDC 自动写入 JSON 日志，
+        // 同时拼进 message 让用户可直接回报，无需查响应头。
+        String traceId = MDC.get(TraceIdFilter.TRACE_ID_KEY);
         log.error("系统内部错误", e);
-        return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(),
-                ErrorCode.SYSTEM_ERROR.getMessage());
+        String message = StringUtils.hasText(traceId)
+                ? ErrorCode.SYSTEM_ERROR.getMessage() + " (traceId: " + traceId + ")"
+                : ErrorCode.SYSTEM_ERROR.getMessage();
+        return Result.fail(ErrorCode.SYSTEM_ERROR.getCode(), message);
     }
 }

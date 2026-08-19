@@ -1,24 +1,36 @@
 # ======================== 开发环境 ========================
 spring:
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:hify_dev}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    user: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:123456}
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${FLYWAY_BASELINE_VERSION:3}
+
   datasource:
     mysql:
-      jdbc-url: jdbc:mysql://localhost:3306/hify_dev?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-      username: root
-      password: 123456
+      jdbc-url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:hify_dev}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+      username: ${MYSQL_USER:root}
+      password: ${MYSQL_PASSWORD:123456}
     postgresql:
-      # 本机便携版 PG 运行在 5433（见 C:\Users\24454\pgdata，PG 17 + pgvector）
-      jdbc-url: jdbc:postgresql://localhost:5433/hify_dev
-      username: hify
-      password: hify
+      jdbc-url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5433}/${PG_DATABASE:hify_dev}
+      username: ${PG_USER:hify}
+      password: ${PG_PASSWORD:hify}
 
   data:
     redis:
-      host: localhost
-      port: 6379
-      password:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
+
+hify:
+  upload-dir: ${HIFY_UPLOAD_DIR:upload}
 
 logging:
   level:

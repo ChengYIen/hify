@@ -1,0 +1,186 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hify-prometheus-alerts
+  namespace: hify
+  labels:
+    app: hify-prometheus
+data:
+  hify-alerts.yml: |
+    groups:
+      - name: hify-availability
+        rules:
+          - alert: HifyBackendDown
+            expr: up{job="hify"} == 0
+            for: 90s
+            labels:
+              severity: P0
+            annotations:
+              summary: "Hify 后端不可达"
+              description: "Prometheus 已连续 90s 抓取不到 Hify 后端，工作时段全员不可用，请立即处理。"
+
+          - alert: HifyMySQLDown
+            expr: hify_component_health{component="mysql"} == 0
+            for: 3m
+            labels:
+              severity: P0
+            annotations:
+              summary: "MySQL 不可用"
+              description: "MySQL 健康检查 DOWN 已持续 3 分钟，业务库不可用，会话/配置/CRUD 全链路受影响。"
+
+          - alert: HifyPgVectorDown
+            expr: hify_component_health{component="pgvector"} == 0
+            for: 5m
+            labels:
+              severity: P1
+            annotations:
+              summary: "pgvector 不可用"
+              description: "pgvector 健康检查 DOWN 已持续 5 分钟，RAG 知识检索不可用（当前探针配置下会进一步影响服务可用性）。"
+
+          - alert: HifyRedisDown
+            expr: hify_component_health{component="redis"} == 0
+            for: 5m
+            labels:
+              severity: P1
+            annotations:
+              summary: "Redis 不可用"
+              description: "Redis 健康检查 DOWN 已持续 5 分钟，对话上下文热缓存失效（代码有 MySQL 回退，但探针耦合会摘除流量）。"
+
+      - name: hify-llm
+        rules:
+          - alert: HifyLlmAllProvidersFailing
+            expr: |
+              (
+                sum(rate(hify_llm_call_count_total{result="failure"}[5m]))
+                /
+                clamp_min(sum(rate(hify_llm_call_count_total[5m])), 1e-6)
+              ) >= 0.5
+              and
+              sum(increase(hify_llm_call_count_total{result="failure"}[5m])) >= 3
+            for: 5m
+            labels:
+              severity: P0
+            annotations:
+              summary: "LLM 全量失败率过高"
+              description: "5 分钟窗口内 LLM 失败占比 >= 50% 且失败数 >= 3，所有 Provider 可能都不可用，对话核心能力下线。"
+
+          - alert: HifyLlmFailureRateHigh
+            expr: |
+              (
+                sum by (provider) (rate(hify_llm_call_count_total{result="failure"}[5m]))
+                /
+                clamp_min(sum by (provider) (rate(hify_llm_call_count_total[5m])), 1e-6)
+              ) > 0.2
+              and
+              sum by (provider) (increase(hify_llm_call_count_total{result="failure"}[5m])) >= 3
+            for: 5m
+            labels:
+              severity: P1
+            annotations:
+              summary: "Provider LLM 失败率偏高"
+              description: "Provider {{ $labels.provider }} 在 5 分钟窗口内失败占比 > 20% 且失败数 >= 3，请 30 分钟内排查。"
+
+          - alert: HifyLlmP95LatencyHigh
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(hify_llm_call_duration_seconds_bucket[5m]))
+              ) > 30
+            for: 10m
+            labels:
+              severity: P2
+            annotations:
+              summary: "LLM P95 延迟超过 30s"
+              description: "LLM 调用 P95 延迟持续超过 30 秒，属质量劣化趋势，次日跟进。"
+
+      - name: hify-provider
+        rules:
+          - alert: HifyCircuitBreakerOpenSoleProvider
+            expr: |
+              hify_circuit_breaker_state == 1
+              and
+              count by () (hify_circuit_breaker_state) == 1
+            for: 5m
+            labels:
+              severity: P0
+            annotations:
+              summary: "唯一 Provider 熔断打开"
+              description: "当前只有 Provider {{ $labels.provider }}，且其熔断器已 OPEN 5 分钟，对话不可用，请立即处理。"
+
+          - alert: HifyCircuitBreakerOpen
+            expr: |
+              hify_circuit_breaker_state == 1
+              and
+              count by () (hify_circuit_breaker_state) > 1
+            for: 5m
+            labels:
+              severity: P1
+            annotations:
+              summary: "Provider 熔断打开"
+              description: "Provider {{ $labels.provider }} 熔断器已 OPEN 5 分钟，仍有其他 Provider 兜底，请 30 分钟内排查。"
+
+          - alert: HifyCircuitBreakerFlapping
+            expr: changes(hify_circuit_breaker_state[15m]) >= 4
+            for: 5m
+            labels:
+              severity: P2
+            annotations:
+              summary: "Provider 熔断状态频繁切换"
+              description: "Provider 熔断器在 15 分钟内发生多次 OPEN/HALF_OPEN/CLOSED 切换，疑似间歇性抖动，次日跟进。"
+
+      - name: hify-conversation
+        rules:
+          - alert: HifyConversationP99LatencyCritical
+            expr: |
+              histogram_quantile(0.99,
+                sum by (le) (rate(hify_conversation_request_duration_seconds_bucket[10m]))
+              ) > 120
+            for: 10m
+            labels:
+              severity: P1
+            annotations:
+              summary: "对话 P99 延迟超过 120s"
+              description: "全链路对话 P99 延迟持续超过 2 分钟，用户体验严重劣化，请 30 分钟内排查。"
+
+          - alert: HifyConversationP99LatencyHigh
+            expr: |
+              histogram_quantile(0.99,
+                sum by (le) (rate(hify_conversation_request_duration_seconds_bucket[15m]))
+              ) > 60
+            for: 10m
+            labels:
+              severity: P2
+            annotations:
+              summary: "对话 P99 延迟超过 60s"
+              description: "全链路对话 P99 延迟持续超过 1 分钟，属体验质量趋势问题，次日跟进。"
+
+      - name: hify-tools
+        rules:
+          - alert: HifyMcpToolFailureRateHigh
+            expr: |
+              (
+                sum(rate(hify_mcp_tool_call_count_total{result="failure"}[10m]))
+                /
+                clamp_min(sum(rate(hify_mcp_tool_call_count_total[10m])), 1e-6)
+              ) > 0.3
+              and
+              sum(increase(hify_mcp_tool_call_count_total{result="failure"}[10m])) >= 5
+            for: 5m
+            labels:
+              severity: P2
+            annotations:
+              summary: "MCP 工具失败率过高"
+              description: "10 分钟窗口内 MCP 工具失败占比 > 30% 且失败数 >= 5，影响具体代答能力，次日跟进。"
+
+      - name: hify-infra
+        rules:
+          - alert: HifyJvmHeapHigh
+            expr: |
+              sum by (job) (jvm_memory_used_bytes{area="heap"})
+              /
+              sum by (job) (jvm_memory_max_bytes{area="heap"}) > 0.9
+            for: 15m
+            labels:
+              severity: P2
+            annotations:
+              summary: "JVM 堆内存使用率过高"
+              description: "堆内存使用率持续 15 分钟超过 90%，存在 OOM/重启风险，次日跟进。"

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hify-prometheus
+  namespace: hify
+  labels:
+    app: hify-prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: hify-prometheus
+  ports:
+    - name: web
+      port: 9090
+      targetPort: web

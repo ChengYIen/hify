@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hify
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - upload-pvc.yaml
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - ingress.yaml
+  - prometheus-config.yaml
+  - prometheus-alerts.yaml
+  - prometheus-pvc.yaml
+  - prometheus-service.yaml
+  - prometheus-deployment.yaml
+
+images:
+  - name: hify-backend
+    newName: your-registry.example.com/hify/backend
+    newTag: 0.0.1
+  - name: hify-frontend
+    newName: your-registry.example.com/hify/frontend
+    newTag: 0.0.1

@@ -1,0 +1,116 @@
+# Hify 本地部署配置模板
+#
+# 两种注入方式：
+# 1. 通过环境变量设置 MYSQL_*、REDIS_*、PG_* 等变量；
+# 2. 直接把下面 ${...:默认值} 中的默认值改成实际配置。
+#
+# start.sh 会使用这个文件作为唯一外部配置文件启动 Jar。
+
+spring:
+  datasource:
+    mysql:
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      jdbc-url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:hify}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+      username: ${MYSQL_USER:hify}
+      password: ${MYSQL_PASSWORD:}
+      maximum-pool-size: ${MYSQL_POOL_MAX_SIZE:10}
+      minimum-idle: ${MYSQL_POOL_MIN_IDLE:2}
+    postgresql:
+      driver-class-name: org.postgresql.Driver
+      jdbc-url: jdbc:postgresql://${PG_HOST:127.0.0.1}:${PG_PORT:5432}/${PG_DATABASE:hify}
+      username: ${PG_USER:hify}
+      password: ${PG_PASSWORD:}
+      maximum-pool-size: ${PG_POOL_MAX_SIZE:5}
+      minimum-idle: ${PG_POOL_MIN_IDLE:1}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 2
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:hify}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    user: ${MYSQL_USER:hify}
+    password: ${MYSQL_PASSWORD:}
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${FLYWAY_BASELINE_VERSION:3}
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+
+hify:
+  upload-dir: ${HIFY_UPLOAD_DIR:./data/upload}
+  llm:
+    timeout:
+      connect: 10s
+      read: 60s
+      write: 30s
+      total: 90s
+    retry:
+      max-attempts: 3
+      initial-delay: 1000
+      max-delay: 30000
+      multiplier: 2.0
+      jitter: 0.3
+    agent:
+      max-iterations: 10
+      total-timeout: 90s
+    tool:
+      timeout: 30s
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      llm-default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        record-exceptions:
+          - java.net.ConnectException
+          - java.io.IOException
+    instances:
+      openai:
+        base-config: llm-default
+      claude:
+        base-config: llm-default
+      gemini:
+        base-config: llm-default
+      ollama:
+        base-config: llm-default

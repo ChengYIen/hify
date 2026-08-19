@@ -1,7 +1,11 @@
 -- ============================================================
 -- Hify 数据库初始化脚本
 -- 适用：MySQL 8.0+
--- 使用：mysql -uroot -p < db/init.sql
+-- 仅用于本地开发环境创建数据库：
+--   mysql -uroot -p < db/init.sql
+--
+-- 生产环境请由 DBA 创建数据库和账号，应用启动时由 Flyway 执行
+-- hify-app/src/main/resources/db/migration 下的 MySQL 迁移。
 -- ============================================================
 
 -- ---------- 创建数据库 ----------
@@ -9,9 +13,8 @@ CREATE DATABASE IF NOT EXISTS hify_dev
   DEFAULT CHARACTER SET utf8mb4
   DEFAULT COLLATE utf8mb4_unicode_ci;
 
--- ---------- 用户表 ----------
--- MVP 阶段表结构从简，MyBatis-Plus 自动建表时追加字段
--- 这里只建库，表结构由后端启动时自动同步（ddl-auto: update）
+-- ---------- 业务表 ----------
+-- 表结构由 Flyway 迁移负责，不在此脚本中重复维护。
 
 -- 如果你需要手动建表，取消下方注释：
 

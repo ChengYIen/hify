@@ -24,6 +24,9 @@ public class LlmResponseDTO {
     /** 模型名称（实际使用的，可能已被降级路由替换） */
     private String model;
 
+    /** 所属提供商实例 ID，供调用链日志和用量统计使用 */
+    private Long providerId;
+
     /** Token 用量 */
     private TokenUsage usage;
 

@@ -89,6 +89,27 @@
             <artifactId>logstash-logback-encoder</artifactId>
         </dependency>
 
+        <!-- Micrometer 核心埋点 API -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+
+        <!-- Micrometer Tracing + OpenTelemetry 桥接（traceId/spanId 生成 + MDC 注入）
+             一期不引 exporter：不接 Jaeger/Zipkin，只用 traceId 串联日志。
+             需要接链路追踪时，加一个 opentelemetry-exporter-* 依赖即可，代码零改动。 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+
+        <!-- Micrometer 上下文传播（ContextPropagatingTaskDecorator 的运行时依赖）
+             线程池跨线程恢复 Observation 作用域，traceId 才能跟到 llmExecutor 里。 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
+        </dependency>
+
         <!-- OkHttp（SSE 流式 LLM 调用） -->
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>

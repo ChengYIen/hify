@@ -202,10 +202,12 @@ resources:
 ```yaml
 # application-prod.yml
 management:
+  server:
+    port: 8081
   endpoints:
     web:
       exposure:
-        include: health,metrics,prometheus
+        include: health,prometheus
   endpoint:
     health:
       probes:
@@ -217,6 +219,15 @@ management:
 | Liveness | `/actuator/health/liveness` | Pod 是否还活着，挂了 K8s 重启 |
 | Readiness | `/actuator/health/readiness` | Pod 能否接收流量，数据库连不上时标 NOT_READY，K8s 暂停路由 |
 | Startup | `/actuator/health` | 启动完成标志，防止请求打到正在初始化的 Pod |
+
+Prometheus 抓取配置：
+
+```yaml
+scrape_configs:
+  - job_name: hify
+    static_configs:
+      - targets: ['hify-backend:8081']
+```
 
 ### 4.3 MySQL
 

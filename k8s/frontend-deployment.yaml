@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hify-frontend
+  labels:
+    app.kubernetes.io/name: hify-frontend
+    app.kubernetes.io/part-of: hify
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hify-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hify-frontend
+        app.kubernetes.io/part-of: hify
+    spec:
+      containers:
+        - name: frontend
+          image: hify-frontend:0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

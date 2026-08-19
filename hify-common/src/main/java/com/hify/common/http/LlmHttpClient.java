@@ -1,5 +1,6 @@
 package com.hify.common.http;
 
+import io.micrometer.context.ContextSnapshot;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -197,6 +198,7 @@ public class LlmHttpClient {
      */
     public Call stream(String url, Map<String, String> headers, String body, StreamCallback callback) {
         long start = System.currentTimeMillis();
+        ContextSnapshot contextSnapshot = ContextSnapshot.captureAll();
 
         Headers okHeaders = Headers.of(headers);
         Request request = new Request.Builder()
@@ -209,53 +211,57 @@ public class LlmHttpClient {
         call.enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                long elapsed = System.currentTimeMillis() - start;
-                log.warn("LLM SSE {} 连接失败 ({}ms): {}", url, elapsed, e.getMessage());
-                callback.onError(classifyNetworkError(e, url));
+                try (ContextSnapshot.Scope ignored = contextSnapshot.setThreadLocals()) {
+                    long elapsed = System.currentTimeMillis() - start;
+                    log.warn("LLM SSE {} 连接失败 ({}ms): {}", url, elapsed, e.getMessage());
+                    callback.onError(classifyNetworkError(e, url));
+                }
             }
 
             @Override
             public void onResponse(Call call, Response response) {
-                int status = response.code();
-                log.info("LLM SSE {} → {} (stream begin)", url, status);
+                try (ContextSnapshot.Scope ignored = contextSnapshot.setThreadLocals()) {
+                    int status = response.code();
+                    log.info("LLM SSE {} → {} (stream begin)", url, status);
 
-                // 状态码校验
-                try {
-                    throwIfError(status, url);
-                } catch (LlmApiException e) {
-                    response.close();
-                    callback.onError(e);
-                    return;
-                }
-
-                // 读取流式响应体
-                ResponseBody responseBody = response.body();
-                if (responseBody == null) {
-                    callback.onComplete();
-                    return;
-                }
-
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(responseBody.byteStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        // SSE 规范：data: 前缀行才传给回调
-                        if (line.startsWith("data: ")) {
-                            String data = line.substring(6);
-                            if ("[DONE]".equals(data)) {
-                                break;
-                            }
-                            callback.onLine(data);
-                        }
+                    // 状态码校验
+                    try {
+                        throwIfError(status, url);
+                    } catch (LlmApiException e) {
+                        response.close();
+                        callback.onError(e);
+                        return;
                     }
-                    long elapsed = System.currentTimeMillis() - start;
-                    log.info("LLM SSE {} 完成 ({}ms)", url, elapsed);
-                    callback.onComplete();
 
-                } catch (IOException e) {
-                    long elapsed = System.currentTimeMillis() - start;
-                    log.warn("LLM SSE {} 读取中断 ({}ms): {}", url, elapsed, e.getMessage());
-                    callback.onError(classifyNetworkError(e, url));
+                    // 读取流式响应体
+                    ResponseBody responseBody = response.body();
+                    if (responseBody == null) {
+                        callback.onComplete();
+                        return;
+                    }
+
+                    try (BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(responseBody.byteStream()))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            // SSE 规范：data: 前缀行才传给回调
+                            if (line.startsWith("data: ")) {
+                                String data = line.substring(6);
+                                if ("[DONE]".equals(data)) {
+                                    break;
+                                }
+                                callback.onLine(data);
+                            }
+                        }
+                        long elapsed = System.currentTimeMillis() - start;
+                        log.info("LLM SSE {} 完成 ({}ms)", url, elapsed);
+                        callback.onComplete();
+
+                    } catch (IOException e) {
+                        long elapsed = System.currentTimeMillis() - start;
+                        log.warn("LLM SSE {} 读取中断 ({}ms): {}", url, elapsed, e.getMessage());
+                        callback.onError(classifyNetworkError(e, url));
+                    }
                 }
             }
         });

@@ -142,6 +142,48 @@ class ChatServiceImplToolTest {
     }
 
     @Test
+    void shouldExecuteMcpToolInBlockingMode() {
+        mockBase();
+        when(llmProviderApi.chat(any(LlmRequestDTO.class)))
+                .thenReturn(LlmResponseDTO.builder()
+                        .model("gpt-4o")
+                        .content("")
+                        .finishReason("tool_calls")
+                        .toolCalls(TOOL_CALLS_JSON)
+                        .build())
+                .thenReturn(LlmResponseDTO.builder()
+                        .content("您的订单已发货")
+                        .model("gpt-4o")
+                        .finishReason("stop")
+                        .build());
+        when(toolExecutionApi.execute(eq(10L), eq("query_order"), any()))
+                .thenReturn(ToolResultDTO.builder()
+                        .success(true)
+                        .content("订单 A1 已发货")
+                        .build());
+        when(chatMessageService.createAssistantMessage(anyLong(), anyString(), anyString(),
+                any(), anyString(), any()))
+                .thenReturn(ChatMessageResponse.builder().id(2L).content("您的订单已发货").build());
+
+        ChatMessageResponse result = chatService.sendBlocking(1L, "查一下订单", 2L);
+
+        assertThat(result.getContent()).isEqualTo("您的订单已发货");
+        ArgumentCaptor<LlmRequestDTO> requestCaptor = ArgumentCaptor.forClass(LlmRequestDTO.class);
+        verify(llmProviderApi, times(2)).chat(requestCaptor.capture());
+        List<LlmRequestDTO> requests = requestCaptor.getAllValues();
+        assertThat(requests.get(0).getTools()).hasSize(1);
+        assertThat(requests.get(1).getTools()).hasSize(1);
+        assertThat(requests.get(1).getMessages())
+                .extracting(LlmRequestDTO.Message::getRole)
+                .containsExactly("system", "assistant", "tool");
+        assertThat(requests.get(1).getMessages().get(2).getToolCallId()).isEqualTo("call_1");
+        assertThat(requests.get(1).getMessages().get(2).getContent()).isEqualTo("订单 A1 已发货");
+        verify(chatMessageService).createAssistantMessage(
+                1L, "您的订单已发货", "gpt-4o", null, "stop", null);
+        verify(llmProviderApi, never()).streamChat(any(), any());
+    }
+
+    @Test
     void shouldFeedToolErrorBackToLlmWithoutInterrupting() {
         mockBase();
         when(llmProviderApi.chat(any(LlmRequestDTO.class)))

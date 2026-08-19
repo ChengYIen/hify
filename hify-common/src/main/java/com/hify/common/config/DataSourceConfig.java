@@ -1,9 +1,13 @@
 package com.hify.common.config;
 
 import com.zaxxer.hikari.HikariDataSource;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.actuate.metrics.jdbc.DataSourcePoolMetrics;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.boot.jdbc.metadata.DataSourcePoolMetadataProvider;
+import org.springframework.boot.jdbc.metadata.HikariDataSourcePoolMetadata;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -12,6 +16,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
+import java.util.Collections;
 
 /**
  * 双数据源配置 —— MySQL（业务主库） + PostgreSQL（向量检索）.
@@ -63,6 +68,39 @@ public class DataSourceConfig {
     @ConfigurationProperties(prefix = "spring.datasource.postgresql")
     public DataSource postgresqlDataSource() {
         return DataSourceBuilder.create().type(HikariDataSource.class).build();
+    }
+
+    /**
+     * 为两个 Hikari 数据源注册 {@code jdbc.connections.*} 指标。
+     * <p>
+     * 应用排除了 {@code DataSourceAutoConfiguration} 且数据源为手动装配，
+     * actuator 的 DataSourcePoolMetrics 自动绑定在此场景不会生效，因此显式绑定。
+     * </p>
+     */
+    @Bean
+    public DataSourcePoolMetrics mysqlDataSourcePoolMetrics(
+            MeterRegistry meterRegistry,
+            @Qualifier("mysqlDataSource") DataSource dataSource) {
+        DataSourcePoolMetrics metrics = new DataSourcePoolMetrics(
+                dataSource, hikariPoolMetadataProvider(), "mysqlDataSource", Collections.emptyList());
+        metrics.bindTo(meterRegistry);
+        return metrics;
+    }
+
+    @Bean
+    public DataSourcePoolMetrics postgresqlDataSourcePoolMetrics(
+            MeterRegistry meterRegistry,
+            @Qualifier("postgresqlDataSource") DataSource dataSource) {
+        DataSourcePoolMetrics metrics = new DataSourcePoolMetrics(
+                dataSource, hikariPoolMetadataProvider(), "postgresqlDataSource", Collections.emptyList());
+        metrics.bindTo(meterRegistry);
+        return metrics;
+    }
+
+    private DataSourcePoolMetadataProvider hikariPoolMetadataProvider() {
+        return dataSource -> dataSource instanceof HikariDataSource
+                ? new HikariDataSourcePoolMetadata((HikariDataSource) dataSource)
+                : null;
     }
 
     // ================================================================

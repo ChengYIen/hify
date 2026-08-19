@@ -23,11 +23,14 @@ import com.hify.shared.llm.dto.LlmRequestDTO;
 import com.hify.shared.llm.dto.LlmResponseDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.logstash.logback.marker.LogstashMarker;
 import okhttp3.Call;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static net.logstash.logback.marker.Markers.append;
 
 /**
  * LLM 提供商统一调用实现 —— 单一路由器.
@@ -64,6 +67,9 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
         ResolvedTarget target = resolveTarget(request.getModelId());
         ChatRequest chatRequest = toChatRequest(target, request, false);
 
+        log.info(llmMarker(request.getModelId(), target),
+                "action=llm_call_start modelId={} providerId={} provider={} modelName={} stream=false",
+                request.getModelId(), target.providerId(), target.providerCode(), target.modelName());
         long start = System.currentTimeMillis();
         ChatResponse response = circuitBreakerService.executeWithResilience(
                 target.providerCode(),
@@ -72,8 +78,14 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
 
         LlmResponseDTO dto = toResponse(response, target);
         dto.setLatencyMs(dto.getLatencyMs() != null ? dto.getLatencyMs() : latency);
-        log.info("LLM 同步对话完成: modelId={}, provider={}, latencyMs={}",
-                request.getModelId(), target.providerCode(), dto.getLatencyMs());
+        log.info(llmMarker(request.getModelId(), target)
+                        .and(append("durationMs", dto.getLatencyMs()))
+                        .and(append("success", true))
+                        .and(append("finishReason", dto.getFinishReason()))
+                        .and(append("tokens", totalTokens(dto.getUsage()))),
+                "action=llm_call_done modelId={} providerId={} provider={} modelName={} durationMs={} success=true finishReason={} tokens={}",
+                request.getModelId(), target.providerId(), target.providerCode(), target.modelName(),
+                dto.getLatencyMs(), dto.getFinishReason(), totalTokens(dto.getUsage()));
         return dto;
     }
 
@@ -82,7 +94,9 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
         ResolvedTarget target = resolveTarget(request.getModelId());
         ChatRequest chatRequest = toChatRequest(target, request, true);
 
-        log.info("LLM 流式对话开始: modelId={}, provider={}", request.getModelId(), target.providerCode());
+        log.info(llmMarker(request.getModelId(), target),
+                "action=llm_call_start modelId={} providerId={} provider={} modelName={} stream=true",
+                request.getModelId(), target.providerId(), target.providerCode(), target.modelName());
         Call call = target.adapter().streamChat(chatRequest, new StreamChatCallback() {
             @Override
             public void onContent(String delta) {
@@ -91,15 +105,26 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
 
             @Override
             public void onComplete(ChatResponse response) {
-                log.info("LLM 流式对话完成: modelId={}, provider={}, latencyMs={}",
-                        request.getModelId(), target.providerCode(), response.getLatencyMs());
+                log.info(llmMarker(request.getModelId(), target)
+                                .and(append("durationMs", response.getLatencyMs()))
+                                .and(append("success", true))
+                                .and(append("finishReason", response.getFinishReason()))
+                                .and(append("tokens", totalTokens(response.getTokenUsage()))),
+                        "action=llm_call_done modelId={} providerId={} provider={} modelName={} durationMs={} success=true finishReason={} tokens={}",
+                        request.getModelId(), target.providerId(), target.providerCode(), target.modelName(),
+                        response.getLatencyMs(), response.getFinishReason(), totalTokens(response.getTokenUsage()));
                 callback.onComplete(toResponse(response, target));
             }
 
             @Override
             public void onError(LlmApiException e) {
-                log.warn("LLM 流式对话出错: modelId={}, provider={}, type={}, msg={}",
-                        request.getModelId(), target.providerCode(), e.getType(), e.getMessage());
+                log.warn(llmMarker(request.getModelId(), target)
+                                .and(append("success", false))
+                                .and(append("errorType", e.getType()))
+                                .and(append("statusCode", e.getStatusCode())),
+                        "action=llm_call_error modelId={} providerId={} provider={} modelName={} success=false errorType={} statusCode={}",
+                        request.getModelId(), target.providerId(), target.providerCode(), target.modelName(),
+                        e.getType(), e.getStatusCode());
                 callback.onError(formatError(e));
             }
         });
@@ -134,8 +159,12 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                         .build()
                 : null;
 
-        log.info("LLM Embedding 完成: modelId={}, provider={}, count={}, latencyMs={}",
-                modelId, target.providerCode(), texts.size(), latency);
+        log.info(llmMarker(modelId, target)
+                        .and(append("durationMs", latency))
+                        .and(append("success", true))
+                        .and(append("textCount", texts.size())),
+                "action=embedding_done modelId={} providerId={} provider={} modelName={} durationMs={} success=true textCount={}",
+                modelId, target.providerId(), target.providerCode(), target.modelName(), latency, texts.size());
         return EmbeddingResponseDTO.builder()
                 .model(response.getModel() != null ? response.getModel() : target.modelName())
                 .embeddings(response.getEmbeddings())
@@ -183,7 +212,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
         Integer embeddingDimensions = modelConfig.getExtraParams() != null
                 ? modelConfig.getExtraParams().getEmbeddingDimensions()
                 : null;
-        return new ResolvedTarget(adapter, provider.getProviderCode(),
+        return new ResolvedTarget(adapter, provider.getProviderCode(), provider.getId(),
                 modelConfig.getModelName(), provider.getBaseUrl(), apiKey, embeddingDimensions);
     }
 
@@ -255,6 +284,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
         return LlmResponseDTO.builder()
                 .content(response.getContent())
                 .model(response.getModel() != null ? response.getModel() : target.modelName())
+                .providerId(target.providerId())
                 .usage(toUsage(response.getTokenUsage()))
                 .finishReason(response.getFinishReason())
                 .toolCalls(response.getToolCalls())
@@ -274,6 +304,21 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                 .build();
     }
 
+    private Integer totalTokens(LlmResponseDTO.TokenUsage usage) {
+        return usage != null ? usage.getTotalTokens() : null;
+    }
+
+    private Integer totalTokens(ChatResponse.TokenUsage usage) {
+        return usage != null ? usage.getTotalTokens() : null;
+    }
+
+    private LogstashMarker llmMarker(Long modelId, ResolvedTarget target) {
+        return append("modelId", modelId)
+                .and(append("providerId", target.providerId()))
+                .and(append("provider", target.providerCode()))
+                .and(append("modelName", target.modelName()));
+    }
+
     /**
      * 将 {@link LlmApiException} 转译为面向用户的错误描述（镜像适配器的 formatError）.
      */
@@ -288,7 +333,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
     }
 
     /** 一次调用解析出的目标对象 */
-    private record ResolvedTarget(ProviderAdapter adapter, String providerCode,
+    private record ResolvedTarget(ProviderAdapter adapter, String providerCode, Long providerId,
                                   String modelName, String baseUrl, String apiKey,
                                   Integer embeddingDimensions) {
     }

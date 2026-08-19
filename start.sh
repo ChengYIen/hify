@@ -21,6 +21,8 @@ MYSQL_USER="${MYSQL_USER:-root}"
 MYSQL_PASSWORD="${MYSQL_PASSWORD:-123456}"  # 默认对齐 application-dev.yml（root/123456 → hify_dev）
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
+PG_HOST="${PG_HOST:-localhost}"
+PG_PORT="${PG_PORT:-5433}"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 HEALTH_URL="http://localhost:${BACKEND_PORT}/api/v1/health"
@@ -108,7 +110,23 @@ else
   fi
 fi
 
-# ---------- 3. 安装前端依赖 ----------
+# ---------- 3. 检查 PostgreSQL/pgvector ----------
+log_info "检测 PostgreSQL (${PG_HOST}:${PG_PORT}) ..."
+if command -v pg_isready &>/dev/null; then
+  if ! pg_isready -h "$PG_HOST" -p "$PG_PORT" &>/dev/null; then
+    log_warn "PostgreSQL 连接失败，继续启动（知识库功能不可用）"
+  else
+    log_info "PostgreSQL 端口检测通过（请确认 vector 扩展已安装）"
+  fi
+else
+  if ! timeout 3 bash -c "echo >/dev/tcp/${PG_HOST}/${PG_PORT}" 2>/dev/null; then
+    log_warn "PostgreSQL 端口 ${PG_PORT} 不可达，继续启动（知识库功能不可用）"
+  else
+    log_info "PostgreSQL 端口可通（未验证账号、数据库和 vector 扩展）"
+  fi
+fi
+
+# ---------- 4. 安装前端依赖 ----------
 log_info "===== 安装前端依赖 ====="
 cd "$FRONTEND_DIR"
 if [ ! -d "node_modules" ]; then
@@ -119,13 +137,13 @@ else
 fi
 cd ..
 
-# ---------- 4. 构建后端 ----------
+# ---------- 5. 构建后端 ----------
 log_info "===== 构建后端 ====="
 log_info "Maven 全量构建（跳过测试）..."
 ./mvnw clean install -DskipTests -q 2>&1 | tail -10
 log_info "后端构建完成"
 
-# ---------- 5. 后台启动后端 ----------
+# ---------- 6. 后台启动后端 ----------
 log_info "===== 启动后端 ====="
 kill_port "$BACKEND_PORT"
 
@@ -133,7 +151,7 @@ kill_port "$BACKEND_PORT"
 BACKEND_PID=$!
 log_info "后端进程启动中 (PID=${BACKEND_PID}) ..."
 
-# ---------- 6. 轮询等待健康检查 ----------
+# ---------- 7. 轮询等待健康检查 ----------
 log_info "===== 等待健康检查 ====="
 
 health_ok=false
@@ -161,7 +179,7 @@ else
   log_warn "无法获取后端实际 PID，使用 Maven wrapper PID=${BACKEND_PID}"
 fi
 
-# ---------- 7. 启动前端 ----------
+# ---------- 8. 启动前端 ----------
 log_info "===== 启动前端 ====="
 cd "$FRONTEND_DIR"
 npm run dev &
@@ -170,7 +188,7 @@ cd ..
 echo "$FRONTEND_PID" > "${PID_DIR}/frontend.pid"
 log_info "前端 PID=${FRONTEND_PID} 已记录到 ${PID_DIR}/frontend.pid"
 
-# ---------- 8. 输出信息 ----------
+# ---------- 9. 输出信息 ----------
 log_info "===== Hify 启动完成 ====="
 echo ""
 echo "  后端:  http://localhost:${BACKEND_PORT}"
@@ -179,7 +197,7 @@ echo ""
 echo "停止服务:  ./stop.sh"
 echo ""
 
-# ---------- 9. 清理回调 ----------
+# ---------- 10. 清理回调 ----------
 cleanup() {
   log_warn "正在停止服务 ..."
   bash stop.sh 2>/dev/null || true
