@@ -81,6 +81,12 @@ management:
       probes:
         enabled: true
       show-details: when-authorized
+      # readiness 分组默认只含 readinessState，依赖指标（redis/mysql/pgvector）不在其中；
+      # 显式 include 全部健康指标，让 Redis/MySQL/PG 故障时 /actuator/health/readiness 返回 503，
+      # K8s readiness 探针据此摘流量（与 deployment-architecture.md 的 readiness 语义对齐）。
+      group:
+        readiness:
+          include: '*'
 
   # OpenTelemetry 链路追踪 —— 一期只用它生成 traceId 串联日志，不接 Jaeger/Zipkin。
   # 没有 exporter 依赖时 span 只在内存中产生 traceId 后丢弃，无网络开销。

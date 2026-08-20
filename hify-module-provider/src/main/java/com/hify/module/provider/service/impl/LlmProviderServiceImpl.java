@@ -72,7 +72,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                 request.getModelId(), target.providerId(), target.providerCode(), target.modelName());
         long start = System.currentTimeMillis();
         ChatResponse response = circuitBreakerService.executeWithResilience(
-                target.providerCode(),
+                target.providerName(),
                 () -> target.adapter().chat(chatRequest));
         long latency = System.currentTimeMillis() - start;
 
@@ -148,7 +148,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
 
         long start = System.currentTimeMillis();
         EmbeddingResponse response = circuitBreakerService.executeWithResilience(
-                target.providerCode(),
+                target.providerName(),
                 () -> target.adapter().embed(request));
         long latency = System.currentTimeMillis() - start;
 
@@ -213,7 +213,8 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                 ? modelConfig.getExtraParams().getEmbeddingDimensions()
                 : null;
         return new ResolvedTarget(adapter, provider.getProviderCode(), provider.getId(),
-                modelConfig.getModelName(), provider.getBaseUrl(), apiKey, embeddingDimensions);
+                provider.getName(), modelConfig.getModelName(), provider.getBaseUrl(), apiKey,
+                embeddingDimensions);
     }
 
     // ================================================================
@@ -285,6 +286,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
                 .content(response.getContent())
                 .model(response.getModel() != null ? response.getModel() : target.modelName())
                 .providerId(target.providerId())
+                .providerName(target.providerName())
                 .usage(toUsage(response.getTokenUsage()))
                 .finishReason(response.getFinishReason())
                 .toolCalls(response.getToolCalls())
@@ -334,7 +336,7 @@ public class LlmProviderServiceImpl implements LlmProviderApi {
 
     /** 一次调用解析出的目标对象 */
     private record ResolvedTarget(ProviderAdapter adapter, String providerCode, Long providerId,
-                                  String modelName, String baseUrl, String apiKey,
-                                  Integer embeddingDimensions) {
+                                  String providerName, String modelName, String baseUrl,
+                                  String apiKey, Integer embeddingDimensions) {
     }
 }

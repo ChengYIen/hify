@@ -6,6 +6,8 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: "prod"
   SERVER_PORT: "8080"
+  # readiness 分组包含全部健康指标，Redis/MySQL/PG 故障时 /actuator/health/readiness 返回 503
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "*"
   FLYWAY_ENABLED: "true"
   FLYWAY_BASELINE_ON_MIGRATE: "true"
   FLYWAY_BASELINE_VERSION: "3"

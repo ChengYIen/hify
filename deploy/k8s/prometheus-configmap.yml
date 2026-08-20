@@ -15,7 +15,24 @@ data:
       - /etc/prometheus/rules/*.yml
 
     scrape_configs:
-          - job_name: hify
-            metrics_path: /actuator/prometheus
-            static_configs:
-              - targets: ['hify-backend:8080']
+      - job_name: hify
+        metrics_path: /actuator/prometheus
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - hify
+        relabel_configs:
+          # 只抓 hify-backend 这个 Service 的端点
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: hify-backend
+          # 只抓 metrics(8081) 端口，跳过业务 8080
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          # 每个 Pod 作为独立实例抓取，避免抓 ClusterIP 时粘在单个 Pod 上导致计数器丢失
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)

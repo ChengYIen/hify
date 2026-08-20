@@ -883,9 +883,11 @@ public class ChatServiceImpl implements ChatService {
         if (metrics == null || sample == null) {
             return;
         }
-        String provider = response != null && response.getProviderId() != null
-                ? String.valueOf(response.getProviderId())
-                : "unknown";
+        String provider = response != null && response.getProviderName() != null
+                ? response.getProviderName()
+                : (response != null && response.getProviderId() != null
+                        ? String.valueOf(response.getProviderId())
+                        : "unknown");
         String model = response != null && response.getModel() != null
                 ? response.getModel()
                 : (modelId != null ? String.valueOf(modelId) : "unknown");

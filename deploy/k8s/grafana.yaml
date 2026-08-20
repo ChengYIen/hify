@@ -949,6 +949,11 @@ spec:
         - name: provisioning
           configMap:
             name: hify-grafana-provisioning
+            items:
+              - key: datasources.yaml
+                path: datasources/datasources.yaml
+              - key: dashboards.yaml
+                path: dashboards/dashboards.yaml
         - name: dashboards
           configMap:
             name: hify-grafana-dashboard

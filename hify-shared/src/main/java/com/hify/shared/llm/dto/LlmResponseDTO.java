@@ -27,6 +27,9 @@ public class LlmResponseDTO {
     /** 所属提供商实例 ID，供调用链日志和用量统计使用 */
     private Long providerId;
 
+    /** 所属提供商名称（如 DeepSeek / OpenAI），供监控指标按 provider 分组 */
+    private String providerName;
+
     /** Token 用量 */
     private TokenUsage usage;
 

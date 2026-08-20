@@ -19,7 +19,7 @@ spec:
       containers:
         - name: backend
           # 本地构建用唯一标签，避免 containerd 命中旧 digest 缓存。
-          image: hify-backend:v20260819b
+          image: hify-backend:v20260819e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -52,22 +52,22 @@ spec:
                   key: OPENAI_API_KEY
           startupProbe:
             httpGet:
-              path: /api/v1/health
-              port: http
+              path: /actuator/health/liveness
+              port: metrics
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 30
           livenessProbe:
             httpGet:
-              path: /api/v1/health
-              port: http
+              path: /actuator/health/liveness
+              port: metrics
             periodSeconds: 15
             timeoutSeconds: 3
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /api/v1/health
-              port: http
+              path: /actuator/health/readiness
+              port: metrics
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3

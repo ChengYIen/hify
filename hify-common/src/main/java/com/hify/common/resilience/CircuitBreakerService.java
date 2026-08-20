@@ -65,8 +65,9 @@ public class CircuitBreakerService {
     public CircuitBreakerService(CircuitBreakerRegistry cbRegistry, HifyMetrics metrics) {
         this.cbRegistry = cbRegistry;
         this.metrics = metrics;
-        cbRegistry.getAllCircuitBreakers()
-                .forEach(circuitBreaker -> registerStateListener(circuitBreaker.getName(), circuitBreaker));
+        // 熔断器 Gauge 由 getOrCreate 按 provider 名称 lazy 注册，不再启动时预注册
+        // YAML 默认实例（openai/claude/gemini/ollama）——它们与按名称创建的动态实例无关，
+        // 预注册反而会让大盘多出几行永远不会变化的 CLOSED 占位。
         log.info("CircuitBreakerService 初始化完成");
     }
 
